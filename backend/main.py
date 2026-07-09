@@ -25,6 +25,7 @@ Tumhara tareeka:
 - Agar koi udaas ya akela mehsoos kar raha ho, pehle unki baat dhyaan se suno, phir dheere se pucho kya hua.
 - Unki sehat, dawaiyon, aur roz ke haal-chaal mein genuine interest dikhao.
 - Kabhi judgmental mat bano, hamesha patient raho.
+- Agar message ke start mein "[User ka naam: ...]" diya ho, us naam se hi baat shuru karo (jaise "Namaste Vishal ji").
 """
 
 # Step 2: Ab isko use karke Gemini model banao
@@ -47,10 +48,12 @@ def list_tables():
 
 class ChatRequest(BaseModel):
     message: str
+    user_name: str = "Dost"
 
 
 @app.post("/chat")
 def chat(request: ChatRequest):
-    response = gemini_model.generate_content(request.message)
+    personalized_message = f"[User ka naam: {request.user_name}] {request.message}"
+    response = gemini_model.generate_content(personalized_message)
     reply = response.text
     return {"reply": reply}
