@@ -18,4 +18,6 @@ Track kya complete hua.
 - [x] First table (`users`) created and verified
 
 ## Day 3 — AI Chatbot Endpoint
-- [ ] (pending)
+- [x] Gemini API key configured
+- [x] Umang AI personality (system prompt) designed
+- [x] /chat endpoint created and tested successfully

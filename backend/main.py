@@ -1,7 +1,8 @@
 """
 Umang AI - Backend Entry Point
 """
-
+from deepgram import DeepgramClient, PrerecordedOptions
+from fastapi import UploadFile, File
 import os
 import google.generativeai as genai
 from fastapi import FastAPI
@@ -34,6 +35,7 @@ gemini_model = genai.GenerativeModel(
     model_name="gemini-flash-latest",
     system_instruction=SYSTEM_PROMPT
 )
+deepgram_client = DeepgramClient(os.getenv("DEEPGRAM_API_KEY"))
 
 @app.get("/health")
 def health_check():
@@ -57,3 +59,22 @@ def chat(request: ChatRequest):
     response = gemini_model.generate_content(personalized_message)
     reply = response.text
     return {"reply": reply}
+
+@app.post("/transcribe")
+async def transcribe_audio(file: UploadFile = File(...)):
+    audio_data = await file.read()
+
+    options = PrerecordedOptions(
+        model="nova-2",
+        language="hi",
+        smart_format=True,
+    )
+
+    response = deepgram_client.listen.prerecorded.v("1").transcribe_file(
+        {"buffer": audio_data},
+        options
+    )
+
+    transcript = response.results.channels[0].alternatives[0].transcript
+
+    return {"transcript": transcript}
