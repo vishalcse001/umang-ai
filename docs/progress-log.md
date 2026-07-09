@@ -21,3 +21,9 @@ Track kya complete hua.
 - [x] Gemini API key configured
 - [x] Umang AI personality (system prompt) designed
 - [x] /chat endpoint created and tested successfully
+
+## Day 4 — Speech-to-Text (Deepgram)
+- [x] Deepgram API key configured
+- [x] python-multipart installed for file uploads
+- [x] /transcribe endpoint created and tested
+- [x] Hindi transcription verified successfully

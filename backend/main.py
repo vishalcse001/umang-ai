@@ -78,3 +78,32 @@ async def transcribe_audio(file: UploadFile = File(...)):
     transcript = response.results.channels[0].alternatives[0].transcript
 
     return {"transcript": transcript}
+
+@app.post("/voice-chat")
+async def voice_chat(file: UploadFile = File(...), user_name: str = "Dost"):
+    # Step 1: Audio ko text mein convert karo
+    audio_data = await file.read()
+
+    options = PrerecordedOptions(
+        model="nova-2",
+        language="hi",
+        smart_format=True,
+    )
+
+    transcribe_response = deepgram_client.listen.prerecorded.v("1").transcribe_file(
+        {"buffer": audio_data},
+        options
+    )
+
+    user_message = transcribe_response.results.channels[0].alternatives[0].transcript
+
+    # Step 2: Us text ko Umang AI ko bhejo
+    personalized_message = f"[User ka naam: {user_name}] {user_message}"
+    ai_response = gemini_model.generate_content(personalized_message)
+    ai_reply = ai_response.text
+
+    # Step 3: Dono wapas bhejo
+    return {
+        "user_said": user_message,
+        "ai_reply": ai_reply
+    }
