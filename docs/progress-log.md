@@ -70,3 +70,11 @@ Track kya complete hua.
 - [x] Resolved environment compatibility issues (tf-keras dependency, OpenCV/haarcascade conflict resolved by switching to the RetinaFace detector backend)
 - [x] Fixed JSON serialization by converting NumPy float outputs to native Python types
 - [x] Validated end-to-end with a real photo — confirmed accurate emotion classification
+
+## Day 11 — Avatar Service Selection + Integration Setup
+- [x] Evaluated D-ID vs HeyGen — selected D-ID for its real-time conversational agent focus, mature streaming API, and lower entry cost, better suited to Umang AI's live voice-chat use case
+- [x] Set up D-ID account and API key, added to `.env`
+- [x] Confirmed API connectivity via `GET /expressives/avatars`
+- [x] Selected "aria" avatar with the "Empathetic" sentiment for a warm, elderly-friendly tone
+- [x] Generated a successful test video via `POST /expressives` + status polling
+- [x] Tuned speech pace using SSML (`<prosody rate="85%">`) for a calmer, more elderly-appropriate delivery speed
