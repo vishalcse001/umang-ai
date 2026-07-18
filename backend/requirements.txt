@@ -8,3 +8,6 @@ deepgram-sdk==3.2.7
 python-multipart
 elevenlabs
 google-genai
+deepface
+opencv-python
+numpy

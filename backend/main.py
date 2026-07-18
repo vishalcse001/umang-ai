@@ -2,6 +2,9 @@
 Umang AI - Backend Entry Point
 """
 
+from deepface import DeepFace
+import numpy as np
+import cv2
 from google import genai as new_genai
 from google.genai.types import EmbedContentConfig
 from sqlalchemy import text
@@ -65,8 +68,10 @@ def get_recent_history(db: Session, user_id: int, limit: int = 10):
     return list(reversed(history))  # purane se naye order mein
 
 
-def save_message(db: Session, user_id: int, role: str, message: str):
-    entry = models.Conversation(user_id=user_id, role=role, message=message)
+def save_message(db: Session, user_id: int, role: str, message: str, emotion: str = None):
+    """Persist a single message (user or assistant) to the conversation history,
+    optionally tagging it with a detected emotional tone."""
+    entry = models.Conversation(user_id=user_id, role=role, message=message, emotion=emotion)
     db.add(entry)
     db.commit()
 
@@ -107,12 +112,36 @@ def get_relevant_knowledge(db: Session, query: str, limit: int = 2):
 
     return rows
 
+ALLOWED_EMOTIONS = ["happy", "sad", "worried", "lonely", "angry", "neutral", "excited", "confused"]
+
+
+def detect_emotion(user_message: str) -> str:
+    """Classify the emotional tone of the user's message using Gemini.
+    Falls back to 'neutral' if classification fails or returns an unexpected value."""
+    prompt = (
+        "Classify the emotional tone of the following message into exactly one of these words: "
+        f"{', '.join(ALLOWED_EMOTIONS)}.\n"
+        "Respond with only the single word, nothing else.\n\n"
+        f"Message: \"{user_message}\""
+    )
+    try:
+        response = emotion_model.generate_content(prompt)
+        detected = response.text.strip().lower()
+        if detected in ALLOWED_EMOTIONS:
+            return detected
+    except Exception:
+        pass
+    return "neutral"
+
 # Step 2: Ab isko use karke Gemini model banao
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 gemini_model = genai.GenerativeModel(
     model_name="gemini-2.5-flash",
     system_instruction=SYSTEM_PROMPT
 )
+# A lightweight model instance dedicated to emotion classification —
+# kept separate from the personality-driven `gemini_model` used for conversation.
+emotion_model = genai.GenerativeModel(model_name="gemini-2.5-flash")
 embedding_client = new_genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 deepgram_client = DeepgramClient(os.getenv("DEEPGRAM_API_KEY"))
 elevenlabs_client = ElevenLabs(api_key=os.getenv("ELEVENLABS_API_KEY"))
@@ -206,6 +235,9 @@ async def voice_chat(
         )
         audio_bytes = b"".join(audio_stream)
         return Response(content=audio_bytes, media_type="audio/mpeg")
+    
+    # Detect the emotional tone of the user's message
+    detected_emotion = detect_emotion(user_message)
 
     
     user = get_or_create_user(db, user_name)
@@ -218,13 +250,17 @@ async def voice_chat(
         for row in knowledge_results:
             knowledge_context += f"- {row.topic}: {row.content}\n"
 
-    # Step 3: History ke sath prompt banao aur Gemini ko bhejo
-    personalized_message = build_prompt_with_history(history, user_name, user_message) + knowledge_context
+
+    personalized_message = (
+        f"[User's detected mood: {detected_emotion}] "
+        + build_prompt_with_history(history, user_name, user_message)
+        + knowledge_context
+    )
     ai_response = gemini_model.generate_content(personalized_message)
     ai_reply = ai_response.text
 
     # Step 4: Dono messages (user + AI) database mein save karo
-    save_message(db, user.id, "user", user_message)
+    save_message(db, user.id, "user", user_message, emotion=detected_emotion)
     save_message(db, user.id, "assistant", ai_reply)
 
     # Step 5: AI ke jawab ko awaaz mein convert karo
@@ -236,3 +272,20 @@ async def voice_chat(
     audio_bytes = b"".join(audio_stream)
 
     return Response(content=audio_bytes, media_type="audio/mpeg")
+
+@app.post("/detect-face-emotion")
+async def detect_face_emotion(file: UploadFile = File(...)):
+    """Analyze a photo to detect the dominant facial emotion."""
+    image_data = await file.read()
+    nparr = np.frombuffer(image_data, np.uint8)
+    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+
+    try:
+        result = DeepFace.analyze(img, actions=["emotion"], enforce_detection=False, detector_backend="retinaface")
+        analysis = result[0] if isinstance(result, list) else result
+        return {
+                "dominant_emotion": str(analysis["dominant_emotion"]),
+                "emotion_scores": {k: float(v) for k, v in analysis["emotion"].items()},
+            }
+    except Exception as e:
+        return {"error": str(e)}

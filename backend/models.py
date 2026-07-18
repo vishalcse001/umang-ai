@@ -19,10 +19,14 @@ class User(Base):
 
 
 class Conversation(Base):
+    """Stores individual messages exchanged between a user and the assistant,
+    enabling persistent, context-aware conversation history."""
+
     __tablename__ = "conversations"
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    role = Column(String, nullable=False)       # "user" ya "assistant"
+    role = Column(String, nullable=False)
     message = Column(String, nullable=False)
+    emotion = Column(String, nullable=True)   # Detected emotional tone (user messages only)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

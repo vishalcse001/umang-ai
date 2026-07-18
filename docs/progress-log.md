@@ -49,3 +49,24 @@ Track kya complete hua.
 - [x] Fixed case-sensitive user matching bug (e.g. "vishal" vs "Vishal" creating duplicate user records)
 - [x] Validated end-to-end: confirmed AI responds in Hindi, English, and Hinglish based on user's spoken language
 - [ ] Known limitation: occasional language misdetection on ambiguous audio (documented Deepgram Nova-3 constraint, not application-level bug)
+
+## Day 8 — RAG Knowledge Base
+- [x] Enabled `pgvector` extension in Supabase and created a `knowledge_base` table (category, topic, content, embedding)
+- [x] Curated 13 safe, general-purpose entries covering common medicines, health tips, and emergency guidance for elderly users — deliberately excluding dosage/prescriptive details to avoid unsafe self-medication advice
+- [x] Generated semantic embeddings for each entry using Google's `gemini-embedding-001` model
+- [x] Implemented `get_relevant_knowledge()` — retrieves the most relevant knowledge base entries via vector similarity search (cosine distance)
+- [x] Integrated retrieval into both `/voice-chat` and `/chat` endpoints, so the AI's responses are grounded in curated knowledge rather than relying solely on general model knowledge
+- [x] Validated end-to-end: confirmed the AI surfaces relevant, safe guidance (e.g. joint pain tips, emergency response) without suggesting specific medications for symptoms
+
+## Day 9 — Emotion Detection (Text-Based)
+- [x] Added `emotion` column to the `conversations` table
+- [x] Implemented `detect_emotion()` using a lightweight Gemini classification call, constrained to a fixed set of emotion labels
+- [x] Integrated emotion detection into the `/voice-chat` pipeline — detected mood is injected into the AI's prompt context and persisted alongside each user message
+- [x] Validated end-to-end: confirmed the AI adapts its tone appropriately based on detected emotion (e.g. responding with extra empathy to a "lonely" classification)
+
+## Day 10 — Face Detection + Emotion (Camera-Based)
+- [x] Integrated DeepFace library for facial emotion analysis
+- [x] Built `/detect-face-emotion` endpoint — accepts an image, detects the face, and returns the dominant emotion with confidence scores across all categories
+- [x] Resolved environment compatibility issues (tf-keras dependency, OpenCV/haarcascade conflict resolved by switching to the RetinaFace detector backend)
+- [x] Fixed JSON serialization by converting NumPy float outputs to native Python types
+- [x] Validated end-to-end with a real photo — confirmed accurate emotion classification
