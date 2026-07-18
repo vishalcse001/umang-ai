@@ -2,6 +2,9 @@
 Umang AI - Backend Entry Point
 """
 
+from google import genai as new_genai
+from google.genai.types import EmbedContentConfig
+from sqlalchemy import text
 from sqlalchemy import func
 from elevenlabs.client import ElevenLabs
 from fastapi.responses import StreamingResponse
@@ -80,12 +83,37 @@ def build_prompt_with_history(history, user_name: str, current_message: str) -> 
     lines.append("Isi context ko yaad rakhte hue naturally reply karo.")
     return "\n".join(lines)
 
+def get_relevant_knowledge(db: Session, query: str, limit: int = 2):
+    """User ke sawal se related knowledge base entries dhundo (semantic search)."""
+    result = embedding_client.models.embed_content(
+        model="gemini-embedding-001",
+        contents=query,
+        config=EmbedContentConfig(
+            task_type="RETRIEVAL_QUERY",
+            output_dimensionality=768,
+        ),
+    )
+    query_embedding = str(result.embeddings[0].values)
+
+    rows = db.execute(
+        text("""
+            SELECT topic, content
+            FROM knowledge_base
+            ORDER BY embedding <=> CAST(:query_embedding AS vector)
+            LIMIT :limit
+        """),
+        {"query_embedding": query_embedding, "limit": limit}
+    ).fetchall()
+
+    return rows
+
 # Step 2: Ab isko use karke Gemini model banao
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 gemini_model = genai.GenerativeModel(
     model_name="gemini-2.5-flash",
     system_instruction=SYSTEM_PROMPT
 )
+embedding_client = new_genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 deepgram_client = DeepgramClient(os.getenv("DEEPGRAM_API_KEY"))
 elevenlabs_client = ElevenLabs(api_key=os.getenv("ELEVENLABS_API_KEY"))
 
@@ -106,10 +134,25 @@ class ChatRequest(BaseModel):
 
 
 @app.post("/chat")
-def chat(request: ChatRequest):
-    personalized_message = f"[User ka naam: {request.user_name}] {request.message}"
+def chat(request: ChatRequest, db: Session = Depends(get_db)):
+    user = get_or_create_user(db, request.user_name)
+    history = get_recent_history(db, user.id, limit=10)
+
+    knowledge_results = get_relevant_knowledge(db, request.message)
+    knowledge_context = ""
+    if knowledge_results:
+        knowledge_context = "\n\nRelevant information:\n"
+        for row in knowledge_results:
+            knowledge_context += f"- {row.topic}: {row.content}\n"
+
+    personalized_message = build_prompt_with_history(history, request.user_name, request.message) + knowledge_context
+
     response = gemini_model.generate_content(personalized_message)
     reply = response.text
+
+    save_message(db, user.id, "user", request.message)
+    save_message(db, user.id, "assistant", reply)
+
     return {"reply": reply}
 
 @app.post("/transcribe")
@@ -164,12 +207,19 @@ async def voice_chat(
         audio_bytes = b"".join(audio_stream)
         return Response(content=audio_bytes, media_type="audio/mpeg")
 
-    # Step 2: User dhundo ya naya banao, aur purani history nikaalo
+    
     user = get_or_create_user(db, user_name)
     history = get_recent_history(db, user.id, limit=10)
 
+    knowledge_results = get_relevant_knowledge(db, user_message)
+    knowledge_context = ""
+    if knowledge_results:
+        knowledge_context = "\n\nRelevant information:\n"
+        for row in knowledge_results:
+            knowledge_context += f"- {row.topic}: {row.content}\n"
+
     # Step 3: History ke sath prompt banao aur Gemini ko bhejo
-    personalized_message = build_prompt_with_history(history, user_name, user_message)
+    personalized_message = build_prompt_with_history(history, user_name, user_message) + knowledge_context
     ai_response = gemini_model.generate_content(personalized_message)
     ai_reply = ai_response.text
 
