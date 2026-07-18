@@ -78,3 +78,9 @@ Track kya complete hua.
 - [x] Selected "aria" avatar with the "Empathetic" sentiment for a warm, elderly-friendly tone
 - [x] Generated a successful test video via `POST /expressives` + status polling
 - [x] Tuned speech pace using SSML (`<prosody rate="85%">`) for a calmer, more elderly-appropriate delivery speed
+
+## Day 12 — Lip-Sync Working
+- [x] Built `/avatar-chat` endpoint — connects the full AI pipeline (memory, knowledge retrieval, emotion detection) to D-ID's avatar video generation
+- [x] AI's dynamic reply (not hardcoded text) is sent to D-ID and rendered as a lip-synced avatar video
+- [x] Validated end-to-end: confirmed the avatar speaks the AI's actual generated response with accurate lip-sync and natural expression
+- [ ] Known limitation: current D-ID trial plan adds a watermark to output videos — will need a paid plan before final demo

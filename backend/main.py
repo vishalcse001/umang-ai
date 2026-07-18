@@ -1,36 +1,49 @@
 """
 Umang AI - Backend Entry Point
+
+FastAPI backend powering Umang AI, a voice-based companion for elderly users.
+Integrates Google Gemini (conversation), Deepgram (speech-to-text), ElevenLabs
+(text-to-speech), D-ID (avatar video), and a Supabase/PostgreSQL knowledge base
+with vector search (RAG).
 """
 
-from deepface import DeepFace
+import os
+import time
+import base64
+from xml.sax.saxutils import escape as xml_escape
+
 import numpy as np
 import cv2
+import requests
+from deepface import DeepFace
+
+from fastapi import FastAPI, UploadFile, File, Response, Depends
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+
+from sqlalchemy import inspect, text, func
+from sqlalchemy.orm import Session
+
+import google.generativeai as genai
 from google import genai as new_genai
 from google.genai.types import EmbedContentConfig
-from sqlalchemy import text
-from sqlalchemy import func
-from elevenlabs.client import ElevenLabs
-from fastapi.responses import StreamingResponse
-from fastapi import Response
-from deepgram import DeepgramClient, PrerecordedOptions
-from fastapi import UploadFile, File
-import os
-import google.generativeai as genai
-from fastapi import FastAPI
-from pydantic import BaseModel
-from sqlalchemy import inspect
-from database import engine, Base
-import models
-from sqlalchemy.orm import Session
-from fastapi import Depends
-from database import get_db
 
-# Startup pe saare tables (agar exist nahi karte) create kar do
+from deepgram import DeepgramClient, PrerecordedOptions
+from elevenlabs.client import ElevenLabs
+
+from database import engine, Base, get_db
+import models
+
+# Create all database tables on startup if they don't already exist.
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="Umang AI Backend")
 
-# Step 1: Pehle personality define karo
+
+# ---------------------------------------------------------------------------
+# AI Personality
+# ---------------------------------------------------------------------------
+
 SYSTEM_PROMPT = """Tum "Umang" ho — ek warm, apnapan wala AI saathi jo akele rehne wale buzurgon ke liye bana hai.
 
 Tumhara tareeka:
@@ -44,8 +57,51 @@ Tumhara tareeka:
 - User jis bhi bhasha ya boli mein baat kare (Hindi, Marathi, Bangla, English, ya koi aur), usi bhasha mein jawab do. Kabhi bhi zabardasti alag bhasha mat use karo. Agar user pure English mein bole, tumhara poora reply bhi pure English mein hona chahiye — Hindi words bilkul mat mix karo.
 """
 
+
+# ---------------------------------------------------------------------------
+# Client / Model Initialization
+# ---------------------------------------------------------------------------
+
+genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+
+# Main conversational model, driven by Umang's personality.
+gemini_model = genai.GenerativeModel(
+    model_name="gemini-2.5-flash",
+    system_instruction=SYSTEM_PROMPT,
+)
+
+# A lightweight, personality-free model instance used only for emotion
+# classification, kept separate from the main conversational model.
+emotion_model = genai.GenerativeModel(model_name="gemini-2.5-flash")
+
+# Client for the newer Google GenAI SDK, used specifically for generating
+# embeddings (the legacy `google.generativeai` package no longer supports
+# embedding models).
+embedding_client = new_genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+
+deepgram_client = DeepgramClient(os.getenv("DEEPGRAM_API_KEY"))
+elevenlabs_client = ElevenLabs(api_key=os.getenv("ELEVENLABS_API_KEY"))
+
+# D-ID (avatar video generation) configuration.
+DID_API_KEY = os.getenv("DID_API_KEY")
+DID_ENCODED_KEY = base64.b64encode(DID_API_KEY.encode()).decode()
+DID_HEADERS = {
+    "Authorization": f"Basic {DID_ENCODED_KEY}",
+    "Content-Type": "application/json",
+}
+DID_AVATAR_ID = "public_aria@avt_BS7cH6"
+DID_SENTIMENT_ID = "snt_CdkbPj"
+
+ALLOWED_EMOTIONS = ["happy", "sad", "worried", "lonely", "angry", "neutral", "excited", "confused"]
+
+
+# ---------------------------------------------------------------------------
+# User & Conversation Helpers
+# ---------------------------------------------------------------------------
+
 def get_or_create_user(db: Session, user_name: str) -> models.User:
-    normalized_name = user_name.strip().title()  # "vishal" -> "Vishal", "VISHAL" -> "Vishal"
+    """Fetch an existing user by name (case-insensitive), or create a new one."""
+    normalized_name = user_name.strip().title()
     user = db.query(models.User).filter(
         func.lower(models.User.name) == normalized_name.lower()
     ).first()
@@ -58,6 +114,8 @@ def get_or_create_user(db: Session, user_name: str) -> models.User:
 
 
 def get_recent_history(db: Session, user_id: int, limit: int = 10):
+    """Retrieve the most recent conversation history for a user, ordered
+    chronologically (oldest to newest)."""
     history = (
         db.query(models.Conversation)
         .filter(models.Conversation.user_id == user_id)
@@ -65,7 +123,7 @@ def get_recent_history(db: Session, user_id: int, limit: int = 10):
         .limit(limit)
         .all()
     )
-    return list(reversed(history))  # purane se naye order mein
+    return list(reversed(history))
 
 
 def save_message(db: Session, user_id: int, role: str, message: str, emotion: str = None):
@@ -77,6 +135,9 @@ def save_message(db: Session, user_id: int, role: str, message: str, emotion: st
 
 
 def build_prompt_with_history(history, user_name: str, current_message: str) -> str:
+    """Construct a context-aware prompt by combining prior conversation
+    history with the user's current message, so the AI can respond with
+    continuity across sessions."""
     if not history:
         return f"[User ka naam: {user_name}] {current_message}"
 
@@ -88,8 +149,30 @@ def build_prompt_with_history(history, user_name: str, current_message: str) -> 
     lines.append("Isi context ko yaad rakhte hue naturally reply karo.")
     return "\n".join(lines)
 
+
+def detect_emotion(user_message: str) -> str:
+    """Classify the emotional tone of the user's message using Gemini.
+    Falls back to 'neutral' if classification fails or returns an
+    unexpected value."""
+    prompt = (
+        "Classify the emotional tone of the following message into exactly one of these words: "
+        f"{', '.join(ALLOWED_EMOTIONS)}.\n"
+        "Respond with only the single word, nothing else.\n\n"
+        f"Message: \"{user_message}\""
+    )
+    try:
+        response = emotion_model.generate_content(prompt)
+        detected = response.text.strip().lower()
+        if detected in ALLOWED_EMOTIONS:
+            return detected
+    except Exception:
+        pass
+    return "neutral"
+
+
 def get_relevant_knowledge(db: Session, query: str, limit: int = 2):
-    """User ke sawal se related knowledge base entries dhundo (semantic search)."""
+    """Perform a semantic search over the knowledge base to find entries
+    most relevant to the user's query, using vector similarity."""
     result = embedding_client.models.embed_content(
         model="gemini-embedding-001",
         contents=query,
@@ -112,39 +195,62 @@ def get_relevant_knowledge(db: Session, query: str, limit: int = 2):
 
     return rows
 
-ALLOWED_EMOTIONS = ["happy", "sad", "worried", "lonely", "angry", "neutral", "excited", "confused"]
+
+def build_knowledge_context(db: Session, query: str) -> str:
+    """Fetch relevant knowledge base entries and format them as additional
+    context to append to the AI prompt."""
+    knowledge_results = get_relevant_knowledge(db, query)
+    if not knowledge_results:
+        return ""
+    context = "\n\nRelevant information:\n"
+    for row in knowledge_results:
+        context += f"- {row.topic}: {row.content}\n"
+    return context
 
 
-def detect_emotion(user_message: str) -> str:
-    """Classify the emotional tone of the user's message using Gemini.
-    Falls back to 'neutral' if classification fails or returns an unexpected value."""
-    prompt = (
-        "Classify the emotional tone of the following message into exactly one of these words: "
-        f"{', '.join(ALLOWED_EMOTIONS)}.\n"
-        "Respond with only the single word, nothing else.\n\n"
-        f"Message: \"{user_message}\""
-    )
-    try:
-        response = emotion_model.generate_content(prompt)
-        detected = response.text.strip().lower()
-        if detected in ALLOWED_EMOTIONS:
-            return detected
-    except Exception:
-        pass
-    return "neutral"
+def generate_avatar_video(text_to_speak: str) -> str:
+    """Send text to D-ID to generate a lip-synced avatar video and poll
+    until rendering completes. Returns the URL of the finished video.
+    This call is synchronous and can take 1-2 minutes, since video
+    rendering is not instant."""
+    safe_text = xml_escape(text_to_speak)
+    payload = {
+        "avatar_id": DID_AVATAR_ID,
+        "sentiment_id": DID_SENTIMENT_ID,
+        "script": {
+            "type": "text",
+            "input": f'<speak><prosody rate="85%">{safe_text}</prosody></speak>',
+            "ssml": True,
+        },
+    }
+    response = requests.post("https://api.d-id.com/expressives", json=payload, headers=DID_HEADERS)
+    response.raise_for_status()
+    video_id = response.json()["id"]
 
-# Step 2: Ab isko use karke Gemini model banao
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-gemini_model = genai.GenerativeModel(
-    model_name="gemini-2.5-flash",
-    system_instruction=SYSTEM_PROMPT
-)
-# A lightweight model instance dedicated to emotion classification —
-# kept separate from the personality-driven `gemini_model` used for conversation.
-emotion_model = genai.GenerativeModel(model_name="gemini-2.5-flash")
-embedding_client = new_genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
-deepgram_client = DeepgramClient(os.getenv("DEEPGRAM_API_KEY"))
-elevenlabs_client = ElevenLabs(api_key=os.getenv("ELEVENLABS_API_KEY"))
+    status_url = f"https://api.d-id.com/expressives/{video_id}"
+    while True:
+        status_response = requests.get(status_url, headers=DID_HEADERS)
+        data = status_response.json()
+        status = data.get("status")
+        if status == "done":
+            return data.get("result_url")
+        elif status == "error":
+            raise Exception(f"D-ID video generation failed: {data}")
+        time.sleep(3)
+
+
+# ---------------------------------------------------------------------------
+# Request Models
+# ---------------------------------------------------------------------------
+
+class ChatRequest(BaseModel):
+    message: str
+    user_name: str = "Dost"
+
+
+# ---------------------------------------------------------------------------
+# Utility Endpoints
+# ---------------------------------------------------------------------------
 
 @app.get("/health")
 def health_check():
@@ -157,22 +263,18 @@ def list_tables():
     return {"tables": inspector.get_table_names()}
 
 
-class ChatRequest(BaseModel):
-    message: str
-    user_name: str = "Dost"
-
+# ---------------------------------------------------------------------------
+# Text-Based Chat Endpoints
+# ---------------------------------------------------------------------------
 
 @app.post("/chat")
 def chat(request: ChatRequest, db: Session = Depends(get_db)):
+    """Text-in, text-out conversation endpoint. Includes conversation
+    memory and knowledge base retrieval, but not emotion detection or
+    avatar generation — useful for quick testing."""
     user = get_or_create_user(db, request.user_name)
     history = get_recent_history(db, user.id, limit=10)
-
-    knowledge_results = get_relevant_knowledge(db, request.message)
-    knowledge_context = ""
-    if knowledge_results:
-        knowledge_context = "\n\nRelevant information:\n"
-        for row in knowledge_results:
-            knowledge_context += f"- {row.topic}: {row.content}\n"
+    knowledge_context = build_knowledge_context(db, request.message)
 
     personalized_message = build_prompt_with_history(history, request.user_name, request.message) + knowledge_context
 
@@ -184,8 +286,39 @@ def chat(request: ChatRequest, db: Session = Depends(get_db)):
 
     return {"reply": reply}
 
+
+@app.post("/avatar-chat")
+def avatar_chat(request: ChatRequest, db: Session = Depends(get_db)):
+    """Full pipeline: text in -> AI reply (with memory, knowledge, and
+    emotion awareness) -> lip-synced avatar video out."""
+    user = get_or_create_user(db, request.user_name)
+    history = get_recent_history(db, user.id, limit=10)
+    detected_emotion = detect_emotion(request.message)
+    knowledge_context = build_knowledge_context(db, request.message)
+
+    personalized_message = (
+        f"[User's detected mood: {detected_emotion}] "
+        + build_prompt_with_history(history, request.user_name, request.message)
+        + knowledge_context
+    )
+    ai_response = gemini_model.generate_content(personalized_message)
+    ai_reply = ai_response.text
+
+    save_message(db, user.id, "user", request.message, emotion=detected_emotion)
+    save_message(db, user.id, "assistant", ai_reply)
+
+    video_url = generate_avatar_video(ai_reply)
+
+    return {"reply": ai_reply, "video_url": video_url}
+
+
+# ---------------------------------------------------------------------------
+# Voice-Based Endpoints
+# ---------------------------------------------------------------------------
+
 @app.post("/transcribe")
 async def transcribe_audio(file: UploadFile = File(...)):
+    """Transcribe an uploaded audio file to text (Hindi only)."""
     audio_data = await file.read()
 
     options = PrerecordedOptions(
@@ -200,8 +333,8 @@ async def transcribe_audio(file: UploadFile = File(...)):
     )
 
     transcript = response.results.channels[0].alternatives[0].transcript
-
     return {"transcript": transcript}
+
 
 @app.post("/voice-chat")
 async def voice_chat(
@@ -209,23 +342,25 @@ async def voice_chat(
     user_name: str = "Dost",
     db: Session = Depends(get_db),
 ):
-    # Step 1: Audio ko text mein convert karo
-    audio_data = await file.read()
+    """Full voice-to-voice pipeline: audio in -> speech-to-text ->
+    AI reply (with memory, knowledge, and emotion awareness) ->
+    text-to-speech audio out."""
 
+    # Step 1: Transcribe the incoming audio (multilingual, code-switching enabled).
+    audio_data = await file.read()
     options = PrerecordedOptions(
         model="nova-3",
         language="multi",
         smart_format=True,
     )
-
     transcribe_response = deepgram_client.listen.prerecorded.v("1").transcribe_file(
         {"buffer": audio_data},
         options
     )
-
     user_message = transcribe_response.results.channels[0].alternatives[0].transcript
 
-    # Agar kuch sunai nahi diya, toh Gemini ko empty message mat bhejo
+    # If nothing was understood, respond with a graceful fallback instead
+    # of sending an empty message to Gemini.
     if not user_message or not user_message.strip():
         fallback_text = "Maaf kijiye, mujhe aapki baat sunai nahi di. Kya aap dobara bol sakte hain?"
         audio_stream = elevenlabs_client.text_to_speech.convert(
@@ -235,22 +370,14 @@ async def voice_chat(
         )
         audio_bytes = b"".join(audio_stream)
         return Response(content=audio_bytes, media_type="audio/mpeg")
-    
-    # Detect the emotional tone of the user's message
-    detected_emotion = detect_emotion(user_message)
 
-    
+    # Step 2: Detect emotional tone, load user + conversation history + knowledge context.
+    detected_emotion = detect_emotion(user_message)
     user = get_or_create_user(db, user_name)
     history = get_recent_history(db, user.id, limit=10)
+    knowledge_context = build_knowledge_context(db, user_message)
 
-    knowledge_results = get_relevant_knowledge(db, user_message)
-    knowledge_context = ""
-    if knowledge_results:
-        knowledge_context = "\n\nRelevant information:\n"
-        for row in knowledge_results:
-            knowledge_context += f"- {row.topic}: {row.content}\n"
-
-
+    # Step 3: Build the full prompt and get the AI's reply.
     personalized_message = (
         f"[User's detected mood: {detected_emotion}] "
         + build_prompt_with_history(history, user_name, user_message)
@@ -259,11 +386,11 @@ async def voice_chat(
     ai_response = gemini_model.generate_content(personalized_message)
     ai_reply = ai_response.text
 
-    # Step 4: Dono messages (user + AI) database mein save karo
+    # Step 4: Persist both sides of the exchange.
     save_message(db, user.id, "user", user_message, emotion=detected_emotion)
     save_message(db, user.id, "assistant", ai_reply)
 
-    # Step 5: AI ke jawab ko awaaz mein convert karo
+    # Step 5: Convert the AI's reply to speech and return it.
     audio_stream = elevenlabs_client.text_to_speech.convert(
         voice_id="pNInz6obpgDQGcFmaJgB",
         text=ai_reply,
@@ -272,6 +399,11 @@ async def voice_chat(
     audio_bytes = b"".join(audio_stream)
 
     return Response(content=audio_bytes, media_type="audio/mpeg")
+
+
+# ---------------------------------------------------------------------------
+# Vision Endpoints
+# ---------------------------------------------------------------------------
 
 @app.post("/detect-face-emotion")
 async def detect_face_emotion(file: UploadFile = File(...)):
@@ -284,8 +416,8 @@ async def detect_face_emotion(file: UploadFile = File(...)):
         result = DeepFace.analyze(img, actions=["emotion"], enforce_detection=False, detector_backend="retinaface")
         analysis = result[0] if isinstance(result, list) else result
         return {
-                "dominant_emotion": str(analysis["dominant_emotion"]),
-                "emotion_scores": {k: float(v) for k, v in analysis["emotion"].items()},
-            }
+            "dominant_emotion": str(analysis["dominant_emotion"]),
+            "emotion_scores": {k: float(v) for k, v in analysis["emotion"].items()},
+        }
     except Exception as e:
         return {"error": str(e)}
