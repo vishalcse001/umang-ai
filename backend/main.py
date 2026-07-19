@@ -8,6 +8,7 @@ with vector search (RAG).
 """
 
 import os
+import re
 import time
 import base64
 from xml.sax.saxutils import escape as xml_escape
@@ -19,6 +20,7 @@ from deepface import DeepFace
 
 from fastapi import FastAPI, UploadFile, File, Response, Depends
 from fastapi.responses import StreamingResponse
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from sqlalchemy import inspect, text, func
@@ -26,7 +28,7 @@ from sqlalchemy.orm import Session
 
 import google.generativeai as genai
 from google import genai as new_genai
-from google.genai.types import EmbedContentConfig
+from google.genai.types import EmbedContentConfig, GenerateContentConfig
 
 from deepgram import DeepgramClient, PrerecordedOptions
 from elevenlabs.client import ElevenLabs
@@ -39,6 +41,14 @@ Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="Umang AI Backend")
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 
 # ---------------------------------------------------------------------------
 # AI Personality
@@ -49,12 +59,12 @@ SYSTEM_PROMPT = """Tum "Umang" ho — ek warm, apnapan wala AI saathi jo akele r
 Tumhara tareeka:
 - Hamesha respect aur pyaar se baat karo, jaise ek achha beta/beti apne maa-baap se baat karta hai.
 - Simple, saral bhasha use karo — mushkil English words ya technical terms bilkul mat lao.
-- Chhoti aur natural baatcheet karo, lambe lecture mat do.
+- Chhoti aur natural baatcheet karo — normal jawab 1-2 sentences mein do, jaise ek real insaan WhatsApp pe baat karta hai. Sirf tab lamba jawab do jab user khud detail mein kuch samjhaने ko bole.
 - Agar koi udaas ya akela mehsoos kar raha ho, pehle unki baat dhyaan se suno, phir dheere se pucho kya hua.
 - Unki sehat, dawaiyon, aur roz ke haal-chaal mein genuine interest dikhao.
 - Kabhi judgmental mat bano, hamesha patient raho.
 - Agar message ke start mein "[User ka naam: ...]" diya ho, us naam se hi baat shuru karo (jaise "Namaste Vishal ji").
-- User jis bhi bhasha ya boli mein baat kare (Hindi, Marathi, Bangla, English, ya koi aur), usi bhasha mein jawab do. Kabhi bhi zabardasti alag bhasha mat use karo. Agar user pure English mein bole, tumhara poora reply bhi pure English mein hona chahiye — Hindi words bilkul mat mix karo.
+- User jis bhi bhasha ya boli mein baat kare (Hindi, Marathi, Bangla, English, ya koi aur), usi bhasha mein jawab do. Agar message ke start mein ek explicit language instruction diya ho (jaise "[Respond in English only]"), toh use hamesha follow karo, chahe tumhara default tareeka kuch bhi ho.
 """
 
 
@@ -64,7 +74,8 @@ Tumhara tareeka:
 
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
-# Main conversational model, driven by Umang's personality.
+# Main conversational model, driven by Umang's personality. Used by the
+# non-streaming endpoints (/voice-chat, /avatar-chat).
 gemini_model = genai.GenerativeModel(
     model_name="gemini-2.5-flash",
     system_instruction=SYSTEM_PROMPT,
@@ -74,10 +85,11 @@ gemini_model = genai.GenerativeModel(
 # classification, kept separate from the main conversational model.
 emotion_model = genai.GenerativeModel(model_name="gemini-2.5-flash")
 
-# Client for the newer Google GenAI SDK, used specifically for generating
-# embeddings (the legacy `google.generativeai` package no longer supports
-# embedding models).
-embedding_client = new_genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+# Client for the newer Google GenAI SDK. Used for embeddings (the legacy
+# `google.generativeai` package no longer supports embedding models) and
+# for true token-by-token streaming (the legacy package buffers its
+# "streaming" output internally and delivers it all at once).
+genai_client = new_genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
 deepgram_client = DeepgramClient(os.getenv("DEEPGRAM_API_KEY"))
 elevenlabs_client = ElevenLabs(api_key=os.getenv("ELEVENLABS_API_KEY"))
@@ -93,6 +105,16 @@ DID_AVATAR_ID = "public_aria@avt_BS7cH6"
 DID_SENTIMENT_ID = "snt_CdkbPj"
 
 ALLOWED_EMOTIONS = ["happy", "sad", "worried", "lonely", "angry", "neutral", "excited", "confused"]
+
+# Common English words used for a fast, zero-latency heuristic that detects
+# when a user has written in plain English, so we can explicitly instruct
+# the model to reply in English rather than relying on it to infer this.
+ENGLISH_HINT_WORDS = {
+    "hello", "hi", "hey", "how", "are", "you", "thanks", "thank", "please",
+    "yes", "no", "ok", "okay", "good", "morning", "evening", "night",
+    "what", "when", "where", "why", "who", "fine", "great", "nice",
+    "today", "tomorrow", "yesterday", "i", "am", "is", "the", "my", "your",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -150,6 +172,19 @@ def build_prompt_with_history(history, user_name: str, current_message: str) -> 
     return "\n".join(lines)
 
 
+def detect_language_hint(message: str) -> str:
+    """Fast, zero-API-call heuristic that flags clearly English messages,
+    so the prompt can explicitly instruct Gemini to reply in English.
+    This avoids the added latency of a separate classification call."""
+    words = re.findall(r"[a-zA-Z']+", message.lower())
+    if not words:
+        return ""
+    english_matches = sum(1 for w in words if w in ENGLISH_HINT_WORDS)
+    if english_matches / len(words) >= 0.5:
+        return "[Respond in English only, with no Hindi words.] "
+    return ""
+
+
 def detect_emotion(user_message: str) -> str:
     """Classify the emotional tone of the user's message using Gemini.
     Falls back to 'neutral' if classification fails or returns an
@@ -170,10 +205,33 @@ def detect_emotion(user_message: str) -> str:
     return "neutral"
 
 
+def is_casual_message(message: str) -> bool:
+    """Heuristic to skip expensive knowledge-base lookups for simple
+    greetings/chit-chat, where retrieval adds latency without adding value."""
+    casual_patterns = ["hello", "hi ", "namaste", "kaise ho", "thik", "theek", "haan", "acha", "ok", "bye", "how are you"]
+    normalized = message.strip().lower()
+    if len(normalized.split()) <= 5:
+        return any(pattern in normalized for pattern in casual_patterns) or len(normalized) < 15
+    return False
+
+HEALTH_KEYWORDS = [
+    "dard", "dawai", "dawa", "medicine", "bp", "sugar", "diabetes",
+    "blood pressure", "ghutna", "joint", "neend", "sleep", "chakkar",
+    "seene", "chest", "bukhar", "fever", "doctor", "health", "sehat",
+]
+
+
+def needs_knowledge_lookup(message: str) -> bool:
+    """Fast, zero-latency keyword check to decide whether this message
+    is worth the extra round-trip of a knowledge-base embedding search."""
+    normalized = message.lower()
+    return any(keyword in normalized for keyword in HEALTH_KEYWORDS)
+
+
 def get_relevant_knowledge(db: Session, query: str, limit: int = 2):
     """Perform a semantic search over the knowledge base to find entries
     most relevant to the user's query, using vector similarity."""
-    result = embedding_client.models.embed_content(
+    result = genai_client.models.embed_content(
         model="gemini-embedding-001",
         contents=query,
         config=EmbedContentConfig(
@@ -197,8 +255,11 @@ def get_relevant_knowledge(db: Session, query: str, limit: int = 2):
 
 
 def build_knowledge_context(db: Session, query: str) -> str:
-    """Fetch relevant knowledge base entries and format them as additional
-    context to append to the AI prompt."""
+    """Fetch relevant knowledge base entries, but only when the message
+    looks health-related — this avoids the embedding-API round trip for
+    the majority of casual conversation, keeping responses fast."""
+    if is_casual_message(query) or not needs_knowledge_lookup(query):
+        return ""
     knowledge_results = get_relevant_knowledge(db, query)
     if not knowledge_results:
         return ""
@@ -269,14 +330,18 @@ def list_tables():
 
 @app.post("/chat")
 def chat(request: ChatRequest, db: Session = Depends(get_db)):
-    """Text-in, text-out conversation endpoint. Includes conversation
-    memory and knowledge base retrieval, but not emotion detection or
-    avatar generation — useful for quick testing."""
+    """Text-in, text-out conversation endpoint (non-streaming). Useful for
+    quick testing; prefer /chat-stream for the actual frontend experience."""
     user = get_or_create_user(db, request.user_name)
     history = get_recent_history(db, user.id, limit=10)
     knowledge_context = build_knowledge_context(db, request.message)
+    language_hint = detect_language_hint(request.message)
 
-    personalized_message = build_prompt_with_history(history, request.user_name, request.message) + knowledge_context
+    personalized_message = (
+        language_hint
+        + build_prompt_with_history(history, request.user_name, request.message)
+        + knowledge_context
+    )
 
     response = gemini_model.generate_content(personalized_message)
     reply = response.text
@@ -287,6 +352,40 @@ def chat(request: ChatRequest, db: Session = Depends(get_db)):
     return {"reply": reply}
 
 
+@app.post("/chat-stream")
+def chat_stream(request: ChatRequest, db: Session = Depends(get_db)):
+    """Same as /chat, but streams the AI's reply token-by-token using the
+    new Google GenAI SDK, which streams genuinely (unlike the legacy SDK's
+    buffered pseudo-streaming). This is what the frontend chat UI uses."""
+    user = get_or_create_user(db, request.user_name)
+    history = get_recent_history(db, user.id, limit=10)
+    knowledge_context = build_knowledge_context(db, request.message)
+    language_hint = detect_language_hint(request.message)
+
+    personalized_message = (
+        language_hint
+        + build_prompt_with_history(history, request.user_name, request.message)
+        + knowledge_context
+    )
+
+    save_message(db, user.id, "user", request.message)
+
+    def stream_response():
+        full_reply = ""
+        stream = genai_client.models.generate_content_stream(
+            model="gemini-2.5-flash",
+            contents=personalized_message,
+            config=GenerateContentConfig(system_instruction=SYSTEM_PROMPT),
+        )
+        for chunk in stream:
+            if chunk.text:
+                full_reply += chunk.text
+                yield chunk.text
+        save_message(db, user.id, "assistant", full_reply)
+
+    return StreamingResponse(stream_response(), media_type="text/plain")
+
+
 @app.post("/avatar-chat")
 def avatar_chat(request: ChatRequest, db: Session = Depends(get_db)):
     """Full pipeline: text in -> AI reply (with memory, knowledge, and
@@ -295,9 +394,11 @@ def avatar_chat(request: ChatRequest, db: Session = Depends(get_db)):
     history = get_recent_history(db, user.id, limit=10)
     detected_emotion = detect_emotion(request.message)
     knowledge_context = build_knowledge_context(db, request.message)
+    language_hint = detect_language_hint(request.message)
 
     personalized_message = (
-        f"[User's detected mood: {detected_emotion}] "
+        language_hint
+        + f"[User's detected mood: {detected_emotion}] "
         + build_prompt_with_history(history, request.user_name, request.message)
         + knowledge_context
     )
@@ -376,10 +477,12 @@ async def voice_chat(
     user = get_or_create_user(db, user_name)
     history = get_recent_history(db, user.id, limit=10)
     knowledge_context = build_knowledge_context(db, user_message)
+    language_hint = detect_language_hint(user_message)
 
     # Step 3: Build the full prompt and get the AI's reply.
     personalized_message = (
-        f"[User's detected mood: {detected_emotion}] "
+        language_hint
+        + f"[User's detected mood: {detected_emotion}] "
         + build_prompt_with_history(history, user_name, user_message)
         + knowledge_context
     )

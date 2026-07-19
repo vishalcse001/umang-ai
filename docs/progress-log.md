@@ -84,3 +84,13 @@ Track kya complete hua.
 - [x] AI's dynamic reply (not hardcoded text) is sent to D-ID and rendered as a lip-synced avatar video
 - [x] Validated end-to-end: confirmed the avatar speaks the AI's actual generated response with accurate lip-sync and natural expression
 - [ ] Known limitation: current D-ID trial plan adds a watermark to output videos — will need a paid plan before final demo
+
+## Day 13 — Frontend UI (React)
+- [x] Scaffolded the frontend using Vite + React
+- [x] Enabled CORS on the backend to allow frontend-backend communication
+- [x] Built a full chat interface: text messaging (via `/chat-stream`) and voice recording (via `/voice-chat`)
+- [x] Implemented a dedicated "voice call" mode with a live status indicator (listening / thinking / speaking), separate from the default text-chat flow
+- [x] Designed a premium, dark-themed UI with glowing accents, glassmorphism cards, and smooth animations
+- [x] Implemented frontend-controlled text reveal for a consistently smooth "typing" effect, independent of backend response timing
+- [x] Fixed a major stability issue: project directory was inside OneDrive, causing `uvicorn --reload` to trigger spurious restarts due to background file sync — resolved by relocating the project outside OneDrive-synced folders
+- [ ] Known area for further optimization: end-to-end response latency (parked for later review)

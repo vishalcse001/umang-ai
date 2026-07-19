@@ -1,5 +1,5 @@
 fastapi
-uvicorn[standard]
+ uvicorn[standard]  #\venv\Scripts\Activate.ps1
 sqlalchemy
 psycopg2-binary
 python-dotenv
@@ -11,3 +11,5 @@ google-genai
 deepface
 opencv-python
 numpy
+requests
+tf-keras
