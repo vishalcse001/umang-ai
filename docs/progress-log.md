@@ -94,3 +94,10 @@ Track kya complete hua.
 - [x] Implemented frontend-controlled text reveal for a consistently smooth "typing" effect, independent of backend response timing
 - [x] Fixed a major stability issue: project directory was inside OneDrive, causing `uvicorn --reload` to trigger spurious restarts due to background file sync — resolved by relocating the project outside OneDrive-synced folders
 - [ ] Known area for further optimization: end-to-end response latency (parked for later review)
+
+## Day 14 — Avatar Embedded in Frontend
+- [x] Added a dedicated "Video Reply" mode in the frontend, connected to the `/avatar-chat` endpoint
+- [x] Kept the avatar/video feature isolated from the core voice-chat flow, since only avatar generation consumes D-ID credits — voice conversations remain unaffected and free
+- [x] Added a live "generating..." state with elapsed-time indicator, since avatar rendering takes 60-90 seconds
+- [x] Improved voice transcription reliability: added an automatic single-language fallback when the multilingual model returns an empty transcript
+- [x] Switched ElevenLabs voice to improve clarity for Hindi/Hinglish speech

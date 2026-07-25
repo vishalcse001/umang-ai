@@ -52,18 +52,34 @@ function PlusIcon() {
   );
 }
 
+function VideoIcon({ size = 20 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <rect x="2" y="6" width="14" height="12" rx="2" fill="currentColor" />
+      <path d="M16 10L22 7V17L16 14V10Z" fill="currentColor" />
+    </svg>
+  );
+}
+
 function App() {
   const [userName, setUserName] = useState(localStorage.getItem("umang_user_name") || "");
   const [nameInput, setNameInput] = useState("");
-  const [view, setView] = useState("home"); // home | chat | voice
+  const [view, setView] = useState("home"); // home | chat | voice | avatar
   const [messages, setMessages] = useState([]);
   const [inputText, setInputText] = useState("");
   const [isSending, setIsSending] = useState(false);
   const [voiceState, setVoiceState] = useState("idle"); // idle | listening | thinking | speaking
 
+  // Avatar (video reply) state
+  const [avatarInput, setAvatarInput] = useState("");
+  const [avatarStatus, setAvatarStatus] = useState("idle"); // idle | generating | ready | error
+  const [avatarVideoUrl, setAvatarVideoUrl] = useState(null);
+  const [avatarElapsed, setAvatarElapsed] = useState(0);
+
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
   const chatEndRef = useRef(null);
+  const avatarTimerRef = useRef(null);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -91,9 +107,6 @@ function App() {
     setIsSending(true);
     setMessages((prev) => [...prev, { role: "assistant", text: "" }]);
 
-    // Reveal speed is controlled entirely on the frontend, independent of
-    // how the network delivers the response, guaranteeing a smooth typing
-    // animation even if the backend response arrives in one chunk.
     let fullText = "";
     let revealedLength = 0;
     let streamDone = false;
@@ -187,6 +200,48 @@ function App() {
     setView("home");
   }
 
+  // ---------------- Avatar (video reply) ----------------
+  async function generateAvatarReply() {
+    const message = avatarInput.trim();
+    if (!message || avatarStatus === "generating") return;
+
+    setAvatarStatus("generating");
+    setAvatarVideoUrl(null);
+    setAvatarElapsed(0);
+
+    avatarTimerRef.current = setInterval(() => {
+      setAvatarElapsed((prev) => prev + 1);
+    }, 1000);
+
+    try {
+      const response = await fetch(`${API_BASE}/avatar-chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message, user_name: userName }),
+      });
+      const data = await response.json();
+      if (data.video_url) {
+        setAvatarVideoUrl(data.video_url);
+        setAvatarStatus("ready");
+      } else {
+        setAvatarStatus("error");
+      }
+    } catch (error) {
+      console.error(error);
+      setAvatarStatus("error");
+    } finally {
+      clearInterval(avatarTimerRef.current);
+    }
+  }
+
+  function exitAvatarMode() {
+    clearInterval(avatarTimerRef.current);
+    setAvatarStatus("idle");
+    setAvatarVideoUrl(null);
+    setAvatarInput("");
+    setView("home");
+  }
+
   // ---------------- Onboarding ----------------
   if (!userName) {
     return (
@@ -246,6 +301,68 @@ function App() {
     );
   }
 
+  // ---------------- Avatar (video reply) mode ----------------
+  if (view === "avatar") {
+    return (
+      <div className="shell">
+        <div className="glow glow-1" />
+        <div className="glow glow-2" />
+        <button className="close-button" onClick={exitAvatarMode}>
+          <CloseIcon />
+        </button>
+
+        <div className="avatar-card">
+          <h2>Video Reply</h2>
+          <p className="avatar-subtitle">
+            Umang will reply with a short video. This takes about a minute to generate.
+          </p>
+
+          {avatarStatus === "idle" && (
+            <div className="avatar-input-row">
+              <input
+                type="text"
+                value={avatarInput}
+                onChange={(e) => setAvatarInput(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && generateAvatarReply()}
+                placeholder="What would you like to ask?"
+                autoFocus
+              />
+              <button className="pill-icon-button accent" onClick={generateAvatarReply}>
+                <SendIcon />
+              </button>
+            </div>
+          )}
+
+          {avatarStatus === "generating" && (
+            <div className="avatar-loading">
+              <div className="avatar-spinner" />
+              <p>Generating your video reply... ({avatarElapsed}s)</p>
+              <span className="avatar-hint">This usually takes 60-90 seconds.</span>
+            </div>
+          )}
+
+          {avatarStatus === "ready" && avatarVideoUrl && (
+            <div className="avatar-video-wrap">
+              <video src={avatarVideoUrl} controls autoPlay className="avatar-video" />
+              <button className="secondary-button" onClick={() => setAvatarStatus("idle")}>
+                Ask something else
+              </button>
+            </div>
+          )}
+
+          {avatarStatus === "error" && (
+            <div className="avatar-loading">
+              <p>Something went wrong generating the video.</p>
+              <button className="secondary-button" onClick={() => setAvatarStatus("idle")}>
+                Try again
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   // ---------------- Home ----------------
   if (view === "home") {
     return (
@@ -284,6 +401,14 @@ function App() {
             <div>
               <strong>Talk with Umang</strong>
               <span>Start a live voice conversation</span>
+            </div>
+          </button>
+
+          <button className="voice-entry-card" onClick={() => setView("avatar")}>
+            <div className="voice-entry-icon avatar-icon"><VideoIcon size={18} /></div>
+            <div>
+              <strong>See Umang</strong>
+              <span>Get a video reply with a talking avatar</span>
             </div>
           </button>
         </div>
