@@ -101,3 +101,9 @@ Track kya complete hua.
 - [x] Added a live "generating..." state with elapsed-time indicator, since avatar rendering takes 60-90 seconds
 - [x] Improved voice transcription reliability: added an automatic single-language fallback when the multilingual model returns an empty transcript
 - [x] Switched ElevenLabs voice to improve clarity for Hindi/Hinglish speech
+
+## Day 15 — Live News Integration
+- [x] Integrated NewsAPI to fetch current headlines
+- [x] Built `/daily-news` endpoint — fetches recent India-relevant news and summarizes it via Gemini into a simple, spoken-style briefing suitable for elderly listeners
+- [x] Resolved a NewsAPI free-tier limitation: `/top-headlines` with `country=in` returned zero results due to limited source coverage; switched to `/everything` with a keyword-based search for reliable results
+- [x] Added proper error surfacing instead of silently returning empty results, to make future debugging easier

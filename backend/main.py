@@ -3,8 +3,8 @@ Umang AI - Backend Entry Point
 
 FastAPI backend powering Umang AI, a voice-based companion for elderly users.
 Integrates Google Gemini (conversation), Deepgram (speech-to-text), ElevenLabs
-(text-to-speech), D-ID (avatar video), and a Supabase/PostgreSQL knowledge base
-with vector search (RAG).
+(text-to-speech), D-ID (avatar video), NewsAPI (daily news briefing), and a
+Supabase/PostgreSQL knowledge base with vector search (RAG).
 """
 
 import os
@@ -75,7 +75,7 @@ Tumhara tareeka:
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
 # Main conversational model, driven by Umang's personality. Used by the
-# non-streaming endpoints (/voice-chat, /avatar-chat).
+# non-streaming endpoints (/voice-chat, /avatar-chat, /daily-news).
 gemini_model = genai.GenerativeModel(
     model_name="gemini-2.5-flash",
     system_instruction=SYSTEM_PROMPT,
@@ -93,6 +93,7 @@ genai_client = new_genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
 deepgram_client = DeepgramClient(os.getenv("DEEPGRAM_API_KEY"))
 elevenlabs_client = ElevenLabs(api_key=os.getenv("ELEVENLABS_API_KEY"))
+ELEVENLABS_VOICE_ID = "21m00Tcm4TlvDq8ikWAM"  # Rachel — clear, warm, works well for Hindi/Hinglish
 
 # D-ID (avatar video generation) configuration.
 DID_API_KEY = os.getenv("DID_API_KEY")
@@ -103,6 +104,8 @@ DID_HEADERS = {
 }
 DID_AVATAR_ID = "public_aria@avt_BS7cH6"
 DID_SENTIMENT_ID = "snt_CdkbPj"
+
+NEWS_API_KEY = os.getenv("NEWS_API_KEY")
 
 ALLOWED_EMOTIONS = ["happy", "sad", "worried", "lonely", "angry", "neutral", "excited", "confused"]
 
@@ -115,6 +118,15 @@ ENGLISH_HINT_WORDS = {
     "what", "when", "where", "why", "who", "fine", "great", "nice",
     "today", "tomorrow", "yesterday", "i", "am", "is", "the", "my", "your",
 }
+
+# Keywords that trigger a knowledge-base lookup. Restricting retrieval to
+# health-related messages avoids the added latency of an embedding API
+# call for casual conversation, where retrieval adds no value.
+HEALTH_KEYWORDS = [
+    "dard", "dawai", "dawa", "medicine", "bp", "sugar", "diabetes",
+    "blood pressure", "ghutna", "joint", "neend", "sleep", "chakkar",
+    "seene", "chest", "bukhar", "fever", "doctor", "health", "sehat",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -214,16 +226,10 @@ def is_casual_message(message: str) -> bool:
         return any(pattern in normalized for pattern in casual_patterns) or len(normalized) < 15
     return False
 
-HEALTH_KEYWORDS = [
-    "dard", "dawai", "dawa", "medicine", "bp", "sugar", "diabetes",
-    "blood pressure", "ghutna", "joint", "neend", "sleep", "chakkar",
-    "seene", "chest", "bukhar", "fever", "doctor", "health", "sehat",
-]
-
 
 def needs_knowledge_lookup(message: str) -> bool:
-    """Fast, zero-latency keyword check to decide whether this message
-    is worth the extra round-trip of a knowledge-base embedding search."""
+    """Fast, zero-latency keyword check to decide whether this message is
+    worth the extra round-trip of a knowledge-base embedding search."""
     normalized = message.lower()
     return any(keyword in normalized for keyword in HEALTH_KEYWORDS)
 
@@ -255,9 +261,9 @@ def get_relevant_knowledge(db: Session, query: str, limit: int = 2):
 
 
 def build_knowledge_context(db: Session, query: str) -> str:
-    """Fetch relevant knowledge base entries, but only when the message
-    looks health-related — this avoids the embedding-API round trip for
-    the majority of casual conversation, keeping responses fast."""
+    """Fetch relevant knowledge base entries and format them as additional
+    context to append to the AI prompt. Skipped for casual/non-health
+    messages to keep response times fast."""
     if is_casual_message(query) or not needs_knowledge_lookup(query):
         return ""
     knowledge_results = get_relevant_knowledge(db, query)
@@ -298,6 +304,45 @@ def generate_avatar_video(text_to_speak: str) -> str:
         elif status == "error":
             raise Exception(f"D-ID video generation failed: {data}")
         time.sleep(3)
+
+
+def fetch_daily_news(limit: int = 5) -> list:
+    """Fetch recent India-relevant news headlines from NewsAPI. Uses the
+    /everything endpoint with a keyword search rather than /top-headlines
+    with a country filter, since the free tier has very limited source
+    coverage for India-specific top-headlines."""
+    params = {
+        "apiKey": NEWS_API_KEY,
+        "q": "India",
+        "language": "en",
+        "sortBy": "publishedAt",
+        "pageSize": limit,
+    }
+    response = requests.get("https://newsapi.org/v2/everything", params=params)
+    data = response.json()
+
+    if data.get("status") != "ok":
+        raise Exception(f"NewsAPI error: {data.get('code')} - {data.get('message')}")
+
+    articles = data.get("articles", [])
+    return [{"title": a["title"], "description": a.get("description") or ""} for a in articles]
+
+
+def summarize_news_for_elderly(articles: list, user_name: str) -> str:
+    """Use Gemini to turn raw headlines into a simple, warm, spoken-style
+    news briefing suitable for an elderly listener."""
+    if not articles:
+        return f"Namaste {user_name} ji, aaj filhaal koi naya samachar uplabdh nahi hai."
+
+    headlines_text = "\n".join(f"- {a['title']}: {a['description']}" for a in articles)
+    prompt = (
+        f"[User ka naam: {user_name}] Yeh aaj ki top khabaren hain:\n\n{headlines_text}\n\n"
+        "In khabaron ko Umang ki tarah, simple aur saral Hindi mein, jaise ek apna beta/beti "
+        "apne buzurg maa-baap ko roz subah khabar sunata hai, waise summarize karo. "
+        "Mushkil words avoid karo, aur bahut lambi na ho — 4-5 khabar chhote mein cover karo."
+    )
+    response = gemini_model.generate_content(prompt)
+    return response.text
 
 
 # ---------------------------------------------------------------------------
@@ -375,7 +420,7 @@ def chat_stream(request: ChatRequest, db: Session = Depends(get_db)):
         stream = genai_client.models.generate_content_stream(
             model="gemini-2.5-flash",
             contents=personalized_message,
-            config=GenerateContentConfig(system_instruction=SYSTEM_PROMPT),
+            config=GenerateContentConfig(system_instruction=SYSTEM_PROMPT, max_output_tokens=200),
         )
         for chunk in stream:
             if chunk.text:
@@ -411,6 +456,19 @@ def avatar_chat(request: ChatRequest, db: Session = Depends(get_db)):
     video_url = generate_avatar_video(ai_reply)
 
     return {"reply": ai_reply, "video_url": video_url}
+
+
+@app.get("/daily-news")
+def daily_news(user_name: str = "Dost"):
+    """Fetch today's top headlines and return them as a simple,
+    elderly-friendly spoken-style summary."""
+    try:
+        articles = fetch_daily_news()
+    except Exception as e:
+        return {"error": str(e)}
+
+    summary = summarize_news_for_elderly(articles, user_name)
+    return {"summary": summary}
 
 
 # ---------------------------------------------------------------------------
@@ -460,12 +518,28 @@ async def voice_chat(
     )
     user_message = transcribe_response.results.channels[0].alternatives[0].transcript
 
-    # If nothing was understood, respond with a graceful fallback instead
-    # of sending an empty message to Gemini.
+    # Fallback: nova-3's multilingual mode occasionally misfires on short or
+    # unclear audio. If the first attempt returns nothing, retry once with
+    # a single-language model, which is more reliable for this audience's
+    # primarily Hindi speech.
+    if not user_message or not user_message.strip():
+        retry_options = PrerecordedOptions(
+            model="nova-2",
+            language="hi",
+            smart_format=True,
+        )
+        retry_response = deepgram_client.listen.prerecorded.v("1").transcribe_file(
+            {"buffer": audio_data},
+            retry_options
+        )
+        user_message = retry_response.results.channels[0].alternatives[0].transcript
+
+    # If still nothing was understood, respond with a graceful fallback
+    # instead of sending an empty message to Gemini.
     if not user_message or not user_message.strip():
         fallback_text = "Maaf kijiye, mujhe aapki baat sunai nahi di. Kya aap dobara bol sakte hain?"
         audio_stream = elevenlabs_client.text_to_speech.convert(
-            voice_id="pNInz6obpgDQGcFmaJgB",
+            voice_id=ELEVENLABS_VOICE_ID,
             text=fallback_text,
             model_id="eleven_multilingual_v2"
         )
@@ -495,7 +569,7 @@ async def voice_chat(
 
     # Step 5: Convert the AI's reply to speech and return it.
     audio_stream = elevenlabs_client.text_to_speech.convert(
-        voice_id="pNInz6obpgDQGcFmaJgB",
+        voice_id=ELEVENLABS_VOICE_ID,
         text=ai_reply,
         model_id="eleven_multilingual_v2"
     )

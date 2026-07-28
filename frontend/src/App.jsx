@@ -371,7 +371,7 @@ function App() {
         <div className="glow glow-2" />
 
         <div className="home-content">
-          <h1 className="greeting">Namaste, {userName}</h1>
+          <h1 className="greeting">Welcome back, {userName}</h1>
           <p className="greeting-sub">How are you feeling today?</p>
 
           <div className="input-pill">
