@@ -107,3 +107,10 @@ Track kya complete hua.
 - [x] Built `/daily-news` endpoint — fetches recent India-relevant news and summarizes it via Gemini into a simple, spoken-style briefing suitable for elderly listeners
 - [x] Resolved a NewsAPI free-tier limitation: `/top-headlines` with `country=in` returned zero results due to limited source coverage; switched to `/everything` with a keyword-based search for reliable results
 - [x] Added proper error surfacing instead of silently returning empty results, to make future debugging easier
+
+## Day 16 — Family Alert System
+- [x] Added `family_email` and `last_alert_sent_at` columns to the `users` table
+- [x] Implemented pattern-based alert triggering — requires 3+ negative emotions (sad/lonely/worried) in the last 5 messages, avoiding false alarms from a single low moment
+- [x] Added a 12-hour cooldown to prevent repeated notifications from overwhelming family members
+- [x] Integrated email delivery via Gmail SMTP (App Password authentication)
+- [x] Validated end-to-end: confirmed alert email is correctly triggered and delivered after a sustained negative emotional pattern

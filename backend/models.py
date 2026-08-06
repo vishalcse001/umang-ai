@@ -15,6 +15,8 @@ class User(Base):
     name = Column(String, nullable=False)
     phone = Column(String, unique=True, nullable=True)
     language = Column(String, default="hindi")
+    family_email = Column(String, nullable=True)
+    last_alert_sent_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 

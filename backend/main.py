@@ -3,14 +3,17 @@ Umang AI - Backend Entry Point
 
 FastAPI backend powering Umang AI, a voice-based companion for elderly users.
 Integrates Google Gemini (conversation), Deepgram (speech-to-text), ElevenLabs
-(text-to-speech), D-ID (avatar video), NewsAPI (daily news briefing), and a
-Supabase/PostgreSQL knowledge base with vector search (RAG).
+(text-to-speech), D-ID (avatar video), NewsAPI (daily news briefing), a family
+alert system, and a Supabase/PostgreSQL knowledge base with vector search (RAG).
 """
 
 import os
 import re
 import time
 import base64
+import smtplib
+from email.mime.text import MIMEText
+from datetime import datetime, timedelta, timezone
 from xml.sax.saxutils import escape as xml_escape
 
 import numpy as np
@@ -107,7 +110,18 @@ DID_SENTIMENT_ID = "snt_CdkbPj"
 
 NEWS_API_KEY = os.getenv("NEWS_API_KEY")
 
+EMAIL_ADDRESS = os.getenv("EMAIL_ADDRESS")
+EMAIL_APP_PASSWORD = os.getenv("EMAIL_APP_PASSWORD")
+
 ALLOWED_EMOTIONS = ["happy", "sad", "worried", "lonely", "angry", "neutral", "excited", "confused"]
+
+# How many of the last N user messages need to carry a negative emotion
+# before triggering a family alert, and how long to wait before sending
+# another alert to avoid overwhelming the family with notifications.
+ALERT_TRIGGER_EMOTIONS = {"sad", "lonely", "worried"}
+ALERT_TRIGGER_THRESHOLD = 3
+ALERT_LOOKBACK_MESSAGES = 5
+ALERT_COOLDOWN_HOURS = 12
 
 # Common English words used for a fast, zero-latency heuristic that detects
 # when a user has written in plain English, so we can explicitly instruct
@@ -345,6 +359,72 @@ def summarize_news_for_elderly(articles: list, user_name: str) -> str:
     return response.text
 
 
+def send_family_alert_email(family_email: str, user_name: str):
+    """Notify a registered family member that the user has shown signs of
+    persistent sadness or loneliness in recent conversations."""
+    subject = f"Umang AI: A note about {user_name}"
+    body = (
+        f"Namaste,\n\n"
+        f"This is an automated note from Umang AI. {user_name} has seemed a little "
+        f"down or lonely in their recent conversations with their companion app.\n\n"
+        f"It might be a good time for a call or a visit — sometimes that's all it takes.\n\n"
+        f"With care,\nUmang AI"
+    )
+
+    message = MIMEText(body)
+    message["Subject"] = subject
+    message["From"] = EMAIL_ADDRESS
+    message["To"] = family_email
+
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+        server.login(EMAIL_ADDRESS, EMAIL_APP_PASSWORD)
+        server.sendmail(EMAIL_ADDRESS, family_email, message.as_string())
+
+
+def check_and_trigger_family_alert(db: Session, user: models.User):
+    """Check whether the user's recent messages show a pattern of negative
+    emotion, and if so, send a one-time (cooldown-limited) alert to their
+    registered family contact.
+
+    NOTE: This function currently includes verbose logging to help verify
+    correct behavior during development. These print statements should be
+    removed or downgraded to proper logging once confirmed working."""
+    if not user.family_email:
+        print(f"[Family Alert] Skipped: no family_email set for user '{user.name}'")
+        return
+
+    if user.last_alert_sent_at:
+        last_sent = user.last_alert_sent_at
+        if last_sent.tzinfo is not None:
+            last_sent = last_sent.astimezone(timezone.utc).replace(tzinfo=None)
+        if datetime.utcnow() - last_sent < timedelta(hours=ALERT_COOLDOWN_HOURS):
+            print(f"[Family Alert] Skipped: still within cooldown (last sent {last_sent})")
+            return
+
+    recent = (
+        db.query(models.Conversation)
+        .filter(models.Conversation.user_id == user.id, models.Conversation.role == "user")
+        .order_by(models.Conversation.created_at.desc())
+        .limit(ALERT_LOOKBACK_MESSAGES)
+        .all()
+    )
+    negative_count = sum(1 for msg in recent if msg.emotion in ALERT_TRIGGER_EMOTIONS)
+    print(
+        f"[Family Alert] negative_count={negative_count} "
+        f"(threshold={ALERT_TRIGGER_THRESHOLD}), "
+        f"recent emotions: {[m.emotion for m in recent]}"
+    )
+
+    if negative_count >= ALERT_TRIGGER_THRESHOLD:
+        try:
+            send_family_alert_email(user.family_email, user.name)
+            user.last_alert_sent_at = datetime.utcnow()
+            db.commit()
+            print(f"[Family Alert] Email sent successfully to {user.family_email}")
+        except Exception as e:
+            print(f"[Family Alert] Failed to send email: {e}")
+
+
 # ---------------------------------------------------------------------------
 # Request Models
 # ---------------------------------------------------------------------------
@@ -375,15 +455,18 @@ def list_tables():
 
 @app.post("/chat")
 def chat(request: ChatRequest, db: Session = Depends(get_db)):
-    """Text-in, text-out conversation endpoint (non-streaming). Useful for
-    quick testing; prefer /chat-stream for the actual frontend experience."""
+    """Text-in, text-out conversation endpoint (non-streaming). Includes
+    emotion detection and family-alert checking. Useful for quick testing;
+    prefer /chat-stream for the actual frontend experience."""
     user = get_or_create_user(db, request.user_name)
     history = get_recent_history(db, user.id, limit=10)
+    detected_emotion = detect_emotion(request.message)
     knowledge_context = build_knowledge_context(db, request.message)
     language_hint = detect_language_hint(request.message)
 
     personalized_message = (
         language_hint
+        + f"[User's detected mood: {detected_emotion}] "
         + build_prompt_with_history(history, request.user_name, request.message)
         + knowledge_context
     )
@@ -391,8 +474,9 @@ def chat(request: ChatRequest, db: Session = Depends(get_db)):
     response = gemini_model.generate_content(personalized_message)
     reply = response.text
 
-    save_message(db, user.id, "user", request.message)
+    save_message(db, user.id, "user", request.message, emotion=detected_emotion)
     save_message(db, user.id, "assistant", reply)
+    check_and_trigger_family_alert(db, user)
 
     return {"reply": reply}
 
@@ -452,6 +536,7 @@ def avatar_chat(request: ChatRequest, db: Session = Depends(get_db)):
 
     save_message(db, user.id, "user", request.message, emotion=detected_emotion)
     save_message(db, user.id, "assistant", ai_reply)
+    check_and_trigger_family_alert(db, user)
 
     video_url = generate_avatar_video(ai_reply)
 
@@ -503,7 +588,7 @@ async def voice_chat(
 ):
     """Full voice-to-voice pipeline: audio in -> speech-to-text ->
     AI reply (with memory, knowledge, and emotion awareness) ->
-    text-to-speech audio out."""
+    text-to-speech audio out. Also checks for family-alert conditions."""
 
     # Step 1: Transcribe the incoming audio (multilingual, code-switching enabled).
     audio_data = await file.read()
@@ -563,9 +648,11 @@ async def voice_chat(
     ai_response = gemini_model.generate_content(personalized_message)
     ai_reply = ai_response.text
 
-    # Step 4: Persist both sides of the exchange.
+    # Step 4: Persist both sides of the exchange, and check whether a
+    # family alert should be triggered based on the recent emotional pattern.
     save_message(db, user.id, "user", user_message, emotion=detected_emotion)
     save_message(db, user.id, "assistant", ai_reply)
+    check_and_trigger_family_alert(db, user)
 
     # Step 5: Convert the AI's reply to speech and return it.
     audio_stream = elevenlabs_client.text_to_speech.convert(
