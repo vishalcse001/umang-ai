@@ -114,3 +114,17 @@ Track kya complete hua.
 - [x] Added a 12-hour cooldown to prevent repeated notifications from overwhelming family members
 - [x] Integrated email delivery via Gmail SMTP (App Password authentication)
 - [x] Validated end-to-end: confirmed alert email is correctly triggered and delivered after a sustained negative emotional pattern
+
+## Day 17 — Medicine + Routine Reminder Loop
+- [x] Added a `reminders` table (title, time, frequency, last acknowledged date)
+- [x] Built `/reminders` (POST/GET) endpoints for creating and listing reminders
+- [x] Implemented `get_due_reminders()` and `build_reminder_context()` — checks for due, unacknowledged reminders and injects them into the AI's prompt
+- [x] Reminders are proactively brought up in natural conversation, phrased warmly rather than as a command, and marked acknowledged once mentioned so they aren't repeated within the same day
+- [x] Validated end-to-end: confirmed Umang proactively reminded the user about a due medicine without being asked
+
+## Day 18 — Frontend UI Overhaul & Integration
+- [x] Rebuilt `App.jsx` and `App.css` to include dedicated UI views for previously headless backend features.
+- [x] Integrated **Daily Briefing (News)**, **Active Reminders**, and **Mood Analysis (Webcam)** directly into the frontend Home Dashboard.
+- [x] Added `GET /user-settings` and `POST /user-settings` to `main.py` to allow users to update their `family_email` from the new Settings UI.
+- [x] Refactored all UI text from casual Hinglish to a clean, **Professional English** terminology (e.g., "Avatar Chat", "Daily Briefing", "Emergency Contact").
+- [x] Fixed stale imports and minor bugs in `models.py` and `main.py` Request Models.

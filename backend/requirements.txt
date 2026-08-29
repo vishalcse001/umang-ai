@@ -1,9 +1,10 @@
 fastapi
- uvicorn[standard]  #\venv\Scripts\Activate.ps1
+uvicorn[standard]
+websockets
+apscheduler
 sqlalchemy
 psycopg2-binary
 python-dotenv
-anthropic
 deepgram-sdk==3.2.7
 python-multipart
 elevenlabs

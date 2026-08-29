@@ -4,7 +4,8 @@ Umang AI - Backend Entry Point
 FastAPI backend powering Umang AI, a voice-based companion for elderly users.
 Integrates Google Gemini (conversation), Deepgram (speech-to-text), ElevenLabs
 (text-to-speech), D-ID (avatar video), NewsAPI (daily news briefing), a family
-alert system, and a Supabase/PostgreSQL knowledge base with vector search (RAG).
+alert system, Supabase/PostgreSQL knowledge base with vector search (RAG),
+WebSocket real-time chat streaming, and a proactive check-in scheduler.
 """
 
 import os
@@ -12,8 +13,11 @@ import re
 import time
 import base64
 import smtplib
+import logging
+from contextlib import asynccontextmanager
 from email.mime.text import MIMEText
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, date
+
 from xml.sax.saxutils import escape as xml_escape
 
 import numpy as np
@@ -21,10 +25,13 @@ import cv2
 import requests
 from deepface import DeepFace
 
-from fastapi import FastAPI, UploadFile, File, Response, Depends
+from fastapi import FastAPI, UploadFile, File, Response, Depends, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
 
 from sqlalchemy import inspect, text, func
 from sqlalchemy.orm import Session
@@ -36,13 +43,82 @@ from google.genai.types import EmbedContentConfig, GenerateContentConfig
 from deepgram import DeepgramClient, PrerecordedOptions
 from elevenlabs.client import ElevenLabs
 
-from database import engine, Base, get_db
+from database import engine, Base, get_db, SessionLocal
 import models
+
+logger = logging.getLogger("umang_ai")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+
+# ---------------------------------------------------------------------------
+# Scheduler: Proactive Check-ins
+# ---------------------------------------------------------------------------
+
+scheduler = AsyncIOScheduler()
+
+def generate_checkin_messages(checkin_type: str):
+    """Background job: generate a proactive check-in message for every user
+    and store it as a PendingCheckin. The user sees it on their next app open."""
+    db = SessionLocal()
+    try:
+        users = db.query(models.User).all()
+        for user in users:
+            # Skip if an undelivered check-in of the same type already exists today
+            today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+            already_exists = (
+                db.query(models.PendingCheckin)
+                .filter(
+                    models.PendingCheckin.user_id == user.id,
+                    models.PendingCheckin.checkin_type == checkin_type,
+                    models.PendingCheckin.created_at >= today_start,
+                )
+                .first()
+            )
+            if already_exists:
+                continue
+
+            if checkin_type == "morning":
+                message = (
+                    f"Good morning, {user.name}! 🌅 Hope you slept well. "
+                    "Have you taken your morning medicines? I'm here if you'd like to chat."
+                )
+            else:
+                message = (
+                    f"Good evening, {user.name}! 🌇 How was your day? "
+                    "Don't forget your evening medicines. I'm always here to listen."
+                )
+
+            checkin = models.PendingCheckin(
+                user_id=user.id,
+                message=message,
+                checkin_type=checkin_type,
+                is_delivered=False,
+            )
+            db.add(checkin)
+        db.commit()
+        logger.info(f"[Scheduler] Generated '{checkin_type}' check-ins for {len(users)} users.")
+    except Exception as e:
+        logger.error(f"[Scheduler] Failed to generate check-ins: {e}")
+    finally:
+        db.close()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Start the APScheduler on app startup and shut it down cleanly on exit."""
+    # Morning check-in at 08:00, evening at 18:00 every day
+    scheduler.add_job(generate_checkin_messages, CronTrigger(hour=8, minute=0), args=["morning"], id="morning_checkin")
+    scheduler.add_job(generate_checkin_messages, CronTrigger(hour=18, minute=0), args=["evening"], id="evening_checkin")
+    scheduler.start()
+    logger.info("[Scheduler] APScheduler started — morning (08:00) and evening (18:00) check-ins scheduled.")
+    yield
+    scheduler.shutdown()
+    logger.info("[Scheduler] APScheduler shut down.")
+
 
 # Create all database tables on startup if they don't already exist.
 Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title="Umang AI Backend")
+app = FastAPI(title="Umang AI Backend", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -51,6 +127,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 
 # ---------------------------------------------------------------------------
@@ -141,6 +218,43 @@ HEALTH_KEYWORDS = [
     "blood pressure", "ghutna", "joint", "neend", "sleep", "chakkar",
     "seene", "chest", "bukhar", "fever", "doctor", "health", "sehat",
 ]
+
+def get_due_reminders(db: Session, user_id: int):
+    """Find active reminders whose time has passed today and haven't
+    already been mentioned to the user today."""
+    now = datetime.now()
+    today = date.today()
+
+    reminders = (
+        db.query(models.Reminder)
+        .filter(
+            models.Reminder.user_id == user_id,
+            models.Reminder.is_active == True,
+            models.Reminder.reminder_time <= now.time(),
+        )
+        .all()
+    )
+    return [r for r in reminders if r.last_acknowledged_date != today]
+
+
+def build_reminder_context(db: Session, user: models.User) -> str:
+    """Check for due reminders and, if any exist, build a context snippet
+    instructing Umang to proactively bring them up. Marks reminders as
+    acknowledged for today so they aren't repeated in every message."""
+    due = get_due_reminders(db, user.id)
+    if not due:
+        return ""
+
+    titles = ", ".join(r.title for r in due)
+    for r in due:
+        r.last_acknowledged_date = date.today()
+    db.commit()
+
+    return (
+        f"\n\n[Important: {user.name} ke aaj ke ye reminders due hain: {titles}. "
+        "Baatcheet mein naturally, pyaar se, inhe yaad dilao — jaise ek apna insaan "
+        "yaad dilata hai, order ki tarah mat bolo.]"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -433,7 +547,14 @@ class ChatRequest(BaseModel):
     message: str
     user_name: str = "Dost"
 
+class ReminderRequest(BaseModel):
+    user_name: str
+    title: str
+    reminder_time: str  # format: "HH:MM", e.g. "09:00"
 
+class UserSettingsRequest(BaseModel):
+    user_name: str
+    family_email: str
 # ---------------------------------------------------------------------------
 # Utility Endpoints
 # ---------------------------------------------------------------------------
@@ -462,6 +583,7 @@ def chat(request: ChatRequest, db: Session = Depends(get_db)):
     history = get_recent_history(db, user.id, limit=10)
     detected_emotion = detect_emotion(request.message)
     knowledge_context = build_knowledge_context(db, request.message)
+    reminder_context = build_reminder_context(db, user)
     language_hint = detect_language_hint(request.message)
 
     personalized_message = (
@@ -469,8 +591,8 @@ def chat(request: ChatRequest, db: Session = Depends(get_db)):
         + f"[User's detected mood: {detected_emotion}] "
         + build_prompt_with_history(history, request.user_name, request.message)
         + knowledge_context
+        + reminder_context
     )
-
     response = gemini_model.generate_content(personalized_message)
     reply = response.text
 
@@ -685,3 +807,149 @@ async def detect_face_emotion(file: UploadFile = File(...)):
         }
     except Exception as e:
         return {"error": str(e)}
+
+@app.post("/reminders")
+def create_reminder(request: ReminderRequest, db: Session = Depends(get_db)):
+    """Create a new daily reminder for a user."""
+    user = get_or_create_user(db, request.user_name)
+    hour, minute = map(int, request.reminder_time.split(":"))
+
+    reminder = models.Reminder(
+        user_id=user.id,
+        title=request.title,
+        reminder_time=datetime.now().replace(hour=hour, minute=minute, second=0).time(),
+    )
+    db.add(reminder)
+    db.commit()
+    db.refresh(reminder)
+
+    return {"id": reminder.id, "title": reminder.title, "time": str(reminder.reminder_time)}
+
+
+@app.get("/reminders")
+def list_reminders(user_name: str, db: Session = Depends(get_db)):
+    """List all active reminders for a user."""
+    user = get_or_create_user(db, user_name)
+    reminders = db.query(models.Reminder).filter(
+        models.Reminder.user_id == user.id, models.Reminder.is_active == True
+    ).all()
+    return [{"id": r.id, "title": r.title, "time": str(r.reminder_time)} for r in reminders]
+
+@app.get("/user-settings")
+def get_user_settings(user_name: str, db: Session = Depends(get_db)):
+    """Fetch user settings (e.g. family email)."""
+    user = get_or_create_user(db, user_name)
+    return {"family_email": user.family_email or ""}
+
+@app.post("/user-settings")
+def update_user_settings(request: UserSettingsRequest, db: Session = Depends(get_db)):
+    """Update user settings."""
+    user = get_or_create_user(db, request.user_name)
+    user.family_email = request.family_email
+    db.commit()
+    return {"status": "success", "family_email": user.family_email}
+
+
+# ---------------------------------------------------------------------------
+# Proactive Check-in Endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/pending-checkins")
+def get_pending_checkins(user_name: str, db: Session = Depends(get_db)):
+    """Return all undelivered check-in messages for a user.
+    Called by the frontend on home screen load to show proactive banners."""
+    user = get_or_create_user(db, user_name)
+    checkins = (
+        db.query(models.PendingCheckin)
+        .filter(
+            models.PendingCheckin.user_id == user.id,
+            models.PendingCheckin.is_delivered == False,
+        )
+        .order_by(models.PendingCheckin.created_at.asc())
+        .all()
+    )
+    return [{"id": c.id, "message": c.message, "type": c.checkin_type} for c in checkins]
+
+
+@app.post("/pending-checkins/{checkin_id}/dismiss")
+def dismiss_checkin(checkin_id: int, db: Session = Depends(get_db)):
+    """Mark a check-in as delivered/dismissed so it isn't shown again."""
+    checkin = db.query(models.PendingCheckin).filter(models.PendingCheckin.id == checkin_id).first()
+    if not checkin:
+        return {"error": "Check-in not found"}
+    checkin.is_delivered = True
+    db.commit()
+    return {"status": "dismissed"}
+
+
+# ---------------------------------------------------------------------------
+# WebSocket Chat Endpoint
+# ---------------------------------------------------------------------------
+
+@app.websocket("/ws/chat")
+async def websocket_chat(websocket: WebSocket):
+    """Real-time bidirectional chat over WebSocket. The client sends a JSON
+    message with `user_name` and `message` fields, and the server streams
+    back the AI reply token-by-token, ending with a sentinel `__END__` frame.
+
+    Using WebSockets (vs. HTTP streaming) eliminates the connection overhead
+    of a new HTTP request per message and enables the server to push events
+    (e.g. check-in notifications) proactively in future iterations.
+    """
+    await websocket.accept()
+    db: Session = SessionLocal()
+
+    try:
+        while True:
+            # Wait for the next message from the client.
+            data = await websocket.receive_json()
+            user_name = data.get("user_name", "Dost")
+            user_message = data.get("message", "").strip()
+
+            if not user_message:
+                await websocket.send_text("__END__")
+                continue
+
+            # Build context — same pipeline as /chat-stream.
+            user = get_or_create_user(db, user_name)
+            history = get_recent_history(db, user.id, limit=10)
+            knowledge_context = build_knowledge_context(db, user_message)
+            language_hint = detect_language_hint(user_message)
+
+            personalized_message = (
+                language_hint
+                + build_prompt_with_history(history, user_name, user_message)
+                + knowledge_context
+            )
+
+            save_message(db, user.id, "user", user_message)
+
+            # Stream the AI reply token-by-token over the WebSocket.
+            full_reply = ""
+            try:
+                stream = genai_client.models.generate_content_stream(
+                    model="gemini-2.5-flash",
+                    contents=personalized_message,
+                    config=GenerateContentConfig(
+                        system_instruction=SYSTEM_PROMPT,
+                        max_output_tokens=200,
+                    ),
+                )
+                for chunk in stream:
+                    if chunk.text:
+                        full_reply += chunk.text
+                        await websocket.send_text(chunk.text)
+            except Exception as e:
+                logger.error(f"[WebSocket] Gemini streaming error: {e}")
+                await websocket.send_text("Sorry, I encountered an error. Please try again.")
+
+            # Signal the client that this reply is complete.
+            await websocket.send_text("__END__")
+            save_message(db, user.id, "assistant", full_reply)
+
+    except WebSocketDisconnect:
+        logger.info("[WebSocket] Client disconnected.")
+    except Exception as e:
+        logger.error(f"[WebSocket] Unexpected error: {e}")
+    finally:
+        db.close()
