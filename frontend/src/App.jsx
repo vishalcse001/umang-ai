@@ -98,7 +98,7 @@ function CameraIcon() {
 function App() {
   const [userName, setUserName] = useState(localStorage.getItem("umang_user_name") || "");
   const [nameInput, setNameInput] = useState("");
-  // views: home | chat | voice | avatar | news | reminders | settings | mood
+  // views: home | chat | voice | avatar | news | reminders | settings | mood | family | history | diary
   const [view, setView] = useState("home"); 
   const [messages, setMessages] = useState([]);
   const [inputText, setInputText] = useState("");
@@ -124,6 +124,7 @@ function App() {
   // Settings states
   const [familyEmail, setFamilyEmail] = useState("");
   const [settingsStatus, setSettingsStatus] = useState("idle");
+  const [sosStatus, setSosStatus] = useState("idle"); // idle | sending | sent | error
 
   // Mood states
   const [moodStatus, setMoodStatus] = useState("idle"); // idle, camera_active, analyzing, result, error
@@ -131,6 +132,23 @@ function App() {
 
   // Proactive check-in state
   const [checkins, setCheckins] = useState([]);
+
+  // Family Dashboard state (Day 21)
+  const [dashboardData, setDashboardData] = useState(null);
+  const [dashboardLoading, setDashboardLoading] = useState(false);
+
+  // Conversation History state (Day 23)
+  const [historyMessages, setHistoryMessages] = useState([]);
+  const [historyPage, setHistoryPage] = useState(1);
+  const [historyTotal, setHistoryTotal] = useState(0);
+  const [historyLoading, setHistoryLoading] = useState(false);
+
+  // Health Diary state (Day 26)
+  const [diaryEntries, setDiaryEntries] = useState([]);
+  const [diaryMood, setDiaryMood] = useState("good");
+  const [diaryNote, setDiaryNote] = useState("");
+  const [diaryEnergy, setDiaryEnergy] = useState(3);
+  const [diaryStatus, setDiaryStatus] = useState("idle");
 
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
@@ -158,6 +176,7 @@ function App() {
       fetchCheckins();
     }
     return () => wsRef.current?.close();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userName]);
 
   useEffect(() => {
@@ -170,10 +189,14 @@ function App() {
     if (view === "settings") fetchSettings();
     if (view === "reminders") fetchReminders();
     if (view === "news") fetchNews();
+    if (view === "family") fetchDashboard();
+    if (view === "history") fetchHistory(1);
+    if (view === "diary") fetchDiaryEntries();
     if (view === "mood") startMoodCamera();
     else stopMoodCamera();
 
     return () => stopMoodCamera();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, userName]);
 
   async function fetchCheckins() {
@@ -193,6 +216,98 @@ function App() {
     } catch (e) {
       console.error(e);
     }
+  }
+
+  // Day 21 — Family Dashboard
+  async function fetchDashboard() {
+    setDashboardLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/family-dashboard?user_name=${encodeURIComponent(userName)}`);
+      const data = await res.json();
+      setDashboardData(data);
+    } catch (e) {
+      console.error(e);
+    }
+    setDashboardLoading(false);
+  }
+
+  // Day 22 — SOS
+  async function triggerSOS() {
+    if (sosStatus === "sending") return;
+    setSosStatus("sending");
+    try {
+      const res = await fetch(`${API_BASE}/sos`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_name: userName }),
+      });
+      const data = await res.json();
+      setSosStatus(data.status === "sent" ? "sent" : "error");
+    } catch (e) {
+  console.error(e);
+  setSosStatus("error");
+}
+    setTimeout(() => setSosStatus("idle"), 5000);
+  }
+
+  // Day 22 — Reminder completion & deletion
+  async function completeReminder(id) {
+    try {
+      await fetch(`${API_BASE}/reminders/${id}/complete`, { method: "POST" });
+      fetchReminders();
+    } catch (e) { console.error(e); }
+  }
+
+  async function deleteReminder(id) {
+    try {
+      await fetch(`${API_BASE}/reminders/${id}`, { method: "DELETE" });
+      fetchReminders();
+    } catch (e) { console.error(e); }
+  }
+
+  // Day 23 — Conversation History
+  async function fetchHistory(page = 1) {
+    setHistoryLoading(true);
+    try {
+      const res = await fetch(
+        `${API_BASE}/conversation-history?user_name=${encodeURIComponent(userName)}&page=${page}&page_size=20`
+      );
+      const data = await res.json();
+      setHistoryMessages(data.messages || []);
+      setHistoryTotal(data.total || 0);
+      setHistoryPage(page);
+    } catch (e) {
+      console.error(e);
+    }
+    setHistoryLoading(false);
+  }
+
+  // Day 26 — Health Diary
+  async function fetchDiaryEntries() {
+    try {
+      const res = await fetch(`${API_BASE}/health-diary?user_name=${encodeURIComponent(userName)}&days=14`);
+      const data = await res.json();
+      setDiaryEntries(data);
+    } catch (e) { console.error(e); }
+  }
+
+  async function saveDiaryEntry() {
+    if (diaryStatus === "saving") return;
+    setDiaryStatus("saving");
+    try {
+      await fetch(`${API_BASE}/health-diary`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_name: userName, mood: diaryMood, note: diaryNote, energy: diaryEnergy }),
+      });
+      setDiaryNote("");
+      setDiaryStatus("saved");
+      fetchDiaryEntries();
+    } catch (e) {
+  console.error(e);
+  setSosStatus("error");
+}
+    setTimeout(() => setDiaryStatus("idle"), 3000);
   }
 
   function confirmName() {
@@ -377,6 +492,7 @@ function App() {
       setSettingsStatus("saved");
       setTimeout(() => setSettingsStatus("idle"), 3000);
     } catch (e) {
+      console.error(e);
       setSettingsStatus("error");
       setTimeout(() => setSettingsStatus("idle"), 3000);
     }
@@ -476,6 +592,7 @@ function App() {
           setMoodStatus("error");
         }
       } catch (e) {
+        console.error(e);
         setMoodStatus("error");
       }
     }, 'image/jpeg');
@@ -525,6 +642,25 @@ function App() {
           <h1 className="greeting">Welcome, {userName}</h1>
           <p className="greeting-sub">How can Umang assist you today?</p>
 
+          {/* Proactive Check-in Banners */}
+          {checkins.length > 0 && (
+            <div className="checkin-banners">
+              {checkins.map((c) => (
+                <div key={c.id} className={`checkin-banner checkin-${c.type}`}>
+                  <span className="checkin-icon">{c.type === "morning" ? "🌅" : "🌙"}</span>
+                  <p className="checkin-message">{c.message}</p>
+                  <button
+                    className="checkin-dismiss"
+                    onClick={() => dismissCheckin(c.id)}
+                    title="Dismiss"
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
           <div className="input-pill">
             <button className="pill-icon-button" onClick={startNewConversation} title="New conversation">
               <PlusIcon />
@@ -572,6 +708,21 @@ function App() {
               <div className="action-icon mood-icon"><CameraIcon /></div>
               <strong>Mood Analysis</strong>
               <span>Emotion detection via camera</span>
+            </button>
+            <button className="action-card" onClick={() => setView("family")}>
+              <div className="action-icon family-icon">📊</div>
+              <strong>Family Dashboard</strong>
+              <span>Mood trends &amp; overview</span>
+            </button>
+            <button className="action-card" onClick={() => setView("history")}>
+              <div className="action-icon history-icon">💬</div>
+              <strong>Chat History</strong>
+              <span>View past conversations</span>
+            </button>
+            <button className="action-card" onClick={() => setView("diary")}>
+              <div className="action-icon diary-icon">📓</div>
+              <strong>Health Diary</strong>
+              <span>Log your daily wellbeing</span>
             </button>
           </div>
         </div>
@@ -753,6 +904,14 @@ function App() {
                     <strong>{r.title}</strong>
                     <span>{r.time}</span>
                   </div>
+                  <div className="reminder-actions">
+                    <button className="icon-ghost-button" onClick={() => completeReminder(r.id)} title="Mark Complete for Today">
+                      ✓
+                    </button>
+                    <button className="icon-ghost-button error" onClick={() => deleteReminder(r.id)} title="Delete Reminder">
+                      ✕
+                    </button>
+                  </div>
                 </li>
               ))}
             </ul>
@@ -797,6 +956,178 @@ function App() {
             >
               {settingsStatus === "saving" ? "Saving..." : settingsStatus === "saved" ? "Saved!" : "Save Changes"}
             </button>
+
+            <div className="sos-section mt-4 pt-4 border-top">
+              <h3>Emergency</h3>
+              <p className="feature-hint mb-3">Instantly send an SOS alert to your emergency contact.</p>
+              <button 
+                className={`primary-button error-bg ${sosStatus === 'sending' ? 'pulsing' : ''}`}
+                onClick={triggerSOS}
+                disabled={sosStatus === "sending" || sosStatus === "sent"}
+              >
+                {sosStatus === "idle" && "Trigger SOS Alert"}
+                {sosStatus === "sending" && "Sending Alert..."}
+                {sosStatus === "sent" && "Alert Sent!"}
+                {sosStatus === "error" && "Failed to Send - Try Again"}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ---------------- Family Dashboard ----------------
+  if (view === "family") {
+    return (
+      <div className="shell">
+        <div className="glow glow-1" />
+        <div className="glow glow-2" />
+        <button className="close-button" onClick={() => setView("home")}><CloseIcon /></button>
+
+        <div className="feature-card family-card">
+          <div className="card-header">
+            <div className="action-icon family-icon">📊</div>
+            <h2>Family Dashboard</h2>
+          </div>
+          
+          {dashboardLoading || !dashboardData ? (
+             <div className="feature-loading"><div className="feature-spinner" /><p>Loading dashboard...</p></div>
+          ) : (
+            <div className="dashboard-content">
+              <div className="dashboard-stats">
+                <div className="stat-box">
+                  <span className="stat-value">{dashboardData.negative_emotion_count_7d}</span>
+                  <span className="stat-label">Negative Moods (7d)</span>
+                </div>
+                <div className="stat-box">
+                  <span className="stat-value">{dashboardData.active_reminders.length}</span>
+                  <span className="stat-label">Active Reminders</span>
+                </div>
+              </div>
+
+              <h3>14-Day Mood Trend</h3>
+              {dashboardData.mood_trend.length === 0 ? <p className="empty-state">No mood data available yet.</p> : (
+                <div className="mood-trend">
+                  {dashboardData.mood_trend.map(day => (
+                    <div key={day.date} className="trend-day">
+                      <span className="trend-date">{day.date.slice(5)}</span>
+                      <span className={`trend-dot emotion-${day.dominant_emotion}`} title={day.dominant_emotion} />
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <h3>Recent Activity</h3>
+              <div className="recent-messages">
+                {dashboardData.recent_messages.map((m, i) => (
+                  <div key={i} className={`dash-msg role-${m.role}`}>
+                    <small>{new Date(m.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} • {m.role}</small>
+                    <p>{m.message}</p>
+                    {m.emotion && <span className="dash-emotion tag">{m.emotion}</span>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ---------------- Conversation History ----------------
+  if (view === "history") {
+    return (
+      <div className="shell">
+        <div className="glow glow-1" />
+        <div className="glow glow-2" />
+        <button className="close-button" onClick={() => setView("home")}><CloseIcon /></button>
+
+        <div className="feature-card history-card">
+          <div className="card-header">
+            <div className="action-icon history-icon">💬</div>
+            <h2>Chat History</h2>
+          </div>
+          
+          {historyLoading ? (
+            <div className="feature-loading"><div className="feature-spinner" /></div>
+          ) : (
+            <>
+              <div className="history-list">
+                {historyMessages.map(m => (
+                  <div key={m.id} className={`hist-msg ${m.role === 'user' ? 'hist-user' : 'hist-ai'}`}>
+                    <div className="hist-meta">
+                      <strong>{m.role === 'user' ? 'You' : 'Umang'}</strong>
+                      <span>{new Date(m.timestamp).toLocaleString()}</span>
+                    </div>
+                    <p>{m.message}</p>
+                    {m.emotion && m.role === 'user' && <span className="tag">Mood: {m.emotion}</span>}
+                  </div>
+                ))}
+              </div>
+              <div className="pagination">
+                <button disabled={historyPage === 1} onClick={() => fetchHistory(historyPage - 1)}>Prev</button>
+                <span>Page {historyPage}</span>
+                <button disabled={historyPage * 20 >= historyTotal} onClick={() => fetchHistory(historyPage + 1)}>Next</button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ---------------- Health Diary ----------------
+  if (view === "diary") {
+    return (
+      <div className="shell">
+        <div className="glow glow-1" />
+        <div className="glow glow-2" />
+        <button className="close-button" onClick={() => setView("home")}><CloseIcon /></button>
+
+        <div className="feature-card diary-card">
+          <div className="card-header">
+            <div className="action-icon diary-icon">📓</div>
+            <h2>Health Diary</h2>
+          </div>
+
+          <div className="diary-form">
+            <select value={diaryMood} onChange={e => setDiaryMood(e.target.value)} className="diary-select">
+              <option value="good">Feeling Good</option>
+              <option value="okay">Feeling Okay</option>
+              <option value="not well">Not Feeling Well</option>
+              <option value="pain">In Pain</option>
+            </select>
+            
+            <div className="energy-slider">
+              <label>Energy Level: {diaryEnergy}/5</label>
+              <input type="range" min="1" max="5" value={diaryEnergy} onChange={e => setDiaryEnergy(Number(e.target.value))} />
+            </div>
+
+            <textarea 
+              placeholder="Any specific symptoms or notes for today?"
+              value={diaryNote}
+              onChange={e => setDiaryNote(e.target.value)}
+              rows={3}
+            />
+            
+            <button className="primary-button" onClick={saveDiaryEntry} disabled={diaryStatus === "saving"}>
+              {diaryStatus === "saving" ? "Saving..." : diaryStatus === "saved" ? "Logged!" : "Log Today's Entry"}
+            </button>
+          </div>
+
+          <h3 className="mt-4">Recent Entries</h3>
+          <div className="diary-history">
+            {diaryEntries.map((e, i) => (
+              <div key={i} className="diary-entry">
+                <div className="diary-date">{e.date}</div>
+                <div className="diary-details">
+                  <span className="tag mood-tag">{e.mood}</span>
+                  <span className="tag energy-tag">Energy: {e.energy}/5</span>
+                </div>
+                {e.note && e.note !== 'none' && <p className="diary-note">{e.note}</p>}
+              </div>
+            ))}
           </div>
         </div>
       </div>

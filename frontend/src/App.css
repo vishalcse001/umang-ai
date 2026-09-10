@@ -21,10 +21,12 @@ h1 {
   display: flex;
   align-items: center;
   justify-content: center;
-  overflow: hidden;
+  /* overflow: hidden; ko replace kiya hai */
+  overflow-y: auto;
+  overflow-x: hidden; 
+  padding: 20px; /* Zoom hone par upar/neeche safe space ke liye */
   background: radial-gradient(circle at 50% 0%, #1c1520 0%, #0b0a10 60%);
 }
-
 .glow {
   position: absolute;
   border-radius: 50%;
@@ -146,9 +148,10 @@ h1 {
 }
 
 .greeting {
-  font-size: clamp(30px, 6vw, 46px);
+  font-size: clamp(35px, 7vw, 30px);
   font-weight: 600;
   margin: 0;
+  padding: 5px 0;
   background: linear-gradient(135deg, #fff 20%, #ffcba3 100%);
   -webkit-background-clip: text;
   background-clip: text;
@@ -158,7 +161,7 @@ h1 {
 .greeting-sub {
   color: #a8988c;
   margin: 8px 0 40px;
-  font-size: 16px;
+  font-size: 19px;
 }
 
 .input-pill {
@@ -817,3 +820,184 @@ h1 {
   .voice-orb { width: 140px; height: 140px; }
   .action-grid { grid-template-columns: 1fr; }
 }
+
+/* ─── Proactive Check-in Banners ─────────────────────────────────── */
+.checkin-banners {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.checkin-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(10px);
+  animation: slideDown 0.35s ease;
+  position: relative;
+}
+
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.checkin-banner.checkin-morning {
+  background: linear-gradient(135deg, rgba(255, 180, 80, 0.15), rgba(255, 140, 60, 0.08));
+  border-color: rgba(255, 160, 60, 0.25);
+}
+
+.checkin-banner.checkin-evening {
+  background: linear-gradient(135deg, rgba(120, 90, 200, 0.18), rgba(90, 60, 160, 0.1));
+  border-color: rgba(130, 100, 210, 0.28);
+}
+
+.checkin-icon {
+  font-size: 22px;
+  line-height: 1;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.checkin-message {
+  flex: 1;
+  margin: 0;
+  font-size: 0.88rem;
+  line-height: 1.5;
+  color: #f2e9e2;
+  opacity: 0.92;
+}
+
+.checkin-dismiss {
+  background: none;
+  border: none;
+  color: rgba(242, 233, 226, 0.45);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  flex-shrink: 0;
+  transition: color 0.2s, background 0.2s;
+}
+
+.checkin-dismiss:hover {
+  color: #f2e9e2;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* ─── Day 21-26 Features ─────────────────────────────────── */
+
+.border-top { border-top: 1px solid rgba(255, 255, 255, 0.1); }
+.pt-4 { padding-top: 16px; }
+.mb-3 { margin-bottom: 12px; }
+
+.error-bg {
+  background: #ef4444;
+  color: white;
+}
+.error-bg:hover { background: #dc2626; }
+.pulsing { animation: pulse-sos 1.5s infinite; }
+@keyframes pulse-sos {
+  0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+  70% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+}
+
+.family-icon { background: linear-gradient(135deg, #38bdf8, #0ea5e9); box-shadow: 0 4px 14px rgba(14, 165, 233, 0.35); }
+.history-icon { background: linear-gradient(135deg, #10b981, #059669); box-shadow: 0 4px 14px rgba(5, 150, 105, 0.35); }
+.diary-icon { background: linear-gradient(135deg, #fbbf24, #d97706); box-shadow: 0 4px 14px rgba(217, 119, 6, 0.35); }
+
+/* Dashboard */
+.dashboard-stats {
+  display: flex;
+  gap: 16px;
+  margin: 20px 0;
+}
+.stat-box {
+  flex: 1;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 12px;
+  padding: 16px;
+  text-align: center;
+  border: 1px solid rgba(255,255,255,0.08);
+}
+.stat-value {
+  display: block;
+  font-size: 28px;
+  font-weight: 700;
+  color: #ff8a5c;
+  margin-bottom: 4px;
+}
+.stat-label { font-size: 12px; color: #a8988c; }
+.mood-trend { display: flex; gap: 8px; justify-content: space-between; margin: 16px 0 24px; }
+.trend-day { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.trend-date { font-size: 10px; color: #8a7d74; }
+.trend-dot { width: 12px; height: 12px; border-radius: 50%; background: #4b5563; }
+.emotion-happy { background: #10b981; }
+.emotion-sad, .emotion-lonely { background: #3b82f6; }
+.emotion-worried, .emotion-angry { background: #ef4444; }
+.emotion-excited { background: #f59e0b; }
+
+.recent-messages { display: flex; flex-direction: column; gap: 12px; margin-top: 12px; }
+.dash-msg {
+  background: rgba(255, 255, 255, 0.03);
+  padding: 12px;
+  border-radius: 8px;
+  font-size: 13px;
+}
+.dash-msg small { color: #8a7d74; display: block; margin-bottom: 4px; }
+.dash-emotion { margin-top: 6px; display: inline-block; }
+
+/* History */
+.history-list { display: flex; flex-direction: column; gap: 12px; margin-top: 16px; }
+.hist-msg {
+  padding: 12px 16px;
+  border-radius: 12px;
+  font-size: 14px;
+  background: rgba(255, 255, 255, 0.04);
+}
+.hist-user { border-left: 3px solid #ff8a5c; }
+.hist-ai { border-left: 3px solid #a06cf5; }
+.hist-meta { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 6px; color: #a8988c; }
+.pagination { display: flex; justify-content: space-between; align-items: center; margin-top: 20px; font-size: 14px; }
+.pagination button { background: rgba(255,255,255,0.1); border: none; color: white; padding: 6px 12px; border-radius: 6px; cursor: pointer; }
+.pagination button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Diary */
+.diary-form { display: flex; flex-direction: column; gap: 16px; margin-top: 16px; }
+.diary-select, .diary-form textarea {
+  width: 100%;
+  padding: 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: white;
+  font-family: inherit;
+  font-size: 14px;
+}
+.diary-select option { background: #16171d; }
+.energy-slider { display: flex; flex-direction: column; gap: 8px; font-size: 14px; }
+.energy-slider input[type=range] { width: 100%; accent-color: #ff8a5c; }
+.diary-history { display: flex; flex-direction: column; gap: 12px; margin-top: 12px; }
+.diary-entry {
+  background: rgba(255, 255, 255, 0.04);
+  padding: 14px;
+  border-radius: 12px;
+}
+.diary-date { font-weight: 600; font-size: 14px; margin-bottom: 8px; }
+.diary-details { display: flex; gap: 8px; margin-bottom: 8px; }
+.diary-note { font-size: 13px; color: #e2dcd6; margin: 0; }
+.tag { font-size: 11px; padding: 2px 8px; border-radius: 10px; background: rgba(255, 255, 255, 0.1); }
+.mood-tag { background: rgba(255, 138, 92, 0.2); color: #ffcba3; }
+.energy-tag { background: rgba(160, 108, 245, 0.2); color: #cbb4f5; }
+
+/* Reminder Actions */
+.reminder-item { display: flex; justify-content: space-between; align-items: center; }
+.reminder-actions { display: flex; gap: 8px; }
+.icon-ghost-button.error { color: #ef4444; }
+.icon-ghost-button.error:hover { background: rgba(239, 68, 68, 0.1); }

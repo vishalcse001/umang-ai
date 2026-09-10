@@ -932,7 +932,7 @@ async def websocket_chat(websocket: WebSocket):
                     contents=personalized_message,
                     config=GenerateContentConfig(
                         system_instruction=SYSTEM_PROMPT,
-                        max_output_tokens=200,
+                        max_output_tokens=1000,
                     ),
                 )
                 for chunk in stream:
@@ -953,3 +953,262 @@ async def websocket_chat(websocket: WebSocket):
         logger.error(f"[WebSocket] Unexpected error: {e}")
     finally:
         db.close()
+
+
+# ---------------------------------------------------------------------------
+# Day 21 — Family Dashboard
+# ---------------------------------------------------------------------------
+
+@app.get("/family-dashboard")
+def family_dashboard(user_name: str, db: Session = Depends(get_db)):
+    """Aggregated data for the family dashboard:
+    - Mood trend over last 14 days (date → dominant emotion)
+    - Last 5 conversations (message + role + timestamp)
+    - Active reminders
+    - Recent SOS / family alert count
+    """
+    user = get_or_create_user(db, user_name)
+
+    # 1. Mood trend — last 14 days
+    cutoff = datetime.now(timezone.utc) - timedelta(days=14)
+    recent_convs = (
+        db.query(models.Conversation)
+        .filter(
+            models.Conversation.user_id == user.id,
+            models.Conversation.role == "user",
+            models.Conversation.created_at >= cutoff,
+        )
+        .order_by(models.Conversation.created_at.asc())
+        .all()
+    )
+
+    mood_by_day: dict[str, dict] = {}
+    for c in recent_convs:
+        if c.emotion:
+            day_key = c.created_at.strftime("%Y-%m-%d")
+            if day_key not in mood_by_day:
+                mood_by_day[day_key] = {}
+            mood_by_day[day_key][c.emotion] = mood_by_day[day_key].get(c.emotion, 0) + 1
+
+    mood_trend = []
+    for day, counts in sorted(mood_by_day.items()):
+        dominant = max(counts, key=counts.get)
+        mood_trend.append({"date": day, "dominant_emotion": dominant, "counts": counts})
+
+    # 2. Last 5 user + assistant messages (interleaved)
+    recent_messages = (
+        db.query(models.Conversation)
+        .filter(models.Conversation.user_id == user.id)
+        .order_by(models.Conversation.created_at.desc())
+        .limit(10)
+        .all()
+    )
+    messages_data = [
+        {
+            "role": m.role,
+            "message": m.message[:200],  # truncate for dashboard
+            "emotion": m.emotion,
+            "timestamp": m.created_at.isoformat() if m.created_at else None,
+        }
+        for m in reversed(recent_messages)
+    ]
+
+    # 3. Active reminders
+    reminders = (
+        db.query(models.Reminder)
+        .filter(models.Reminder.user_id == user.id, models.Reminder.is_active == True)
+        .all()
+    )
+    reminders_data = [{"title": r.title, "time": str(r.reminder_time)} for r in reminders]
+
+    # 4. Negative emotion count in last 7 days
+    week_ago = datetime.now(timezone.utc) - timedelta(days=7)
+    negative_count = (
+        db.query(models.Conversation)
+        .filter(
+            models.Conversation.user_id == user.id,
+            models.Conversation.role == "user",
+            models.Conversation.created_at >= week_ago,
+            models.Conversation.emotion.in_(["sad", "lonely", "worried"]),
+        )
+        .count()
+    )
+
+    return {
+        "user_name": user.name,
+        "family_email": user.family_email or "",
+        "mood_trend": mood_trend,
+        "recent_messages": messages_data,
+        "active_reminders": reminders_data,
+        "negative_emotion_count_7d": negative_count,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Day 22 — Emergency SOS & Reminder Completion
+# ---------------------------------------------------------------------------
+
+class SOSRequest(BaseModel):
+    user_name: str
+    message: str = "Mujhe abhi help chahiye! Please contact me immediately."
+
+
+@app.post("/sos")
+def trigger_sos(request: SOSRequest, db: Session = Depends(get_db)):
+    """One-tap SOS: immediately sends an urgent email to the user's registered
+    family contact, bypassing the normal emotion-threshold cooldown check."""
+    user = get_or_create_user(db, request.user_name)
+
+    if not user.family_email:
+        return {"status": "error", "message": "No family email registered. Please add one in Settings."}
+
+    subject = f"🚨 URGENT: {user.name} needs immediate help — Umang AI SOS"
+    body = (
+        f"Dear Family Member,\n\n"
+        f"This is an URGENT SOS alert from Umang AI.\n\n"
+        f"{user.name} has manually triggered an emergency alert at {datetime.now().strftime('%d %b %Y, %I:%M %p')}.\n\n"
+        f"Message from {user.name}:\n\"{request.message}\"\n\n"
+        f"Please contact them immediately.\n\n"
+        f"— Umang AI Safety System"
+    )
+
+    try:
+        msg = MIMEText(body)
+        msg["Subject"] = subject
+        msg["From"] = EMAIL_ADDRESS
+        msg["To"] = user.family_email
+
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
+            smtp.login(EMAIL_ADDRESS, EMAIL_APP_PASSWORD)
+            smtp.sendmail(EMAIL_ADDRESS, user.family_email, msg.as_string())
+
+        logger.info(f"[SOS] Alert sent to {user.family_email} for user {user.name}")
+        return {"status": "sent", "to": user.family_email}
+    except Exception as e:
+        logger.error(f"[SOS] Failed to send: {e}")
+        return {"status": "error", "message": str(e)}
+
+
+@app.post("/reminders/{reminder_id}/complete")
+def complete_reminder(reminder_id: int, db: Session = Depends(get_db)):
+    """Mark a reminder as done for today (sets last_acknowledged_date to today)."""
+    reminder = db.query(models.Reminder).filter(models.Reminder.id == reminder_id).first()
+    if not reminder:
+        return {"error": "Reminder not found"}
+    reminder.last_acknowledged_date = date.today()
+    db.commit()
+    return {"status": "completed", "title": reminder.title}
+
+
+@app.delete("/reminders/{reminder_id}")
+def delete_reminder(reminder_id: int, db: Session = Depends(get_db)):
+    """Soft-delete a reminder by marking it inactive."""
+    reminder = db.query(models.Reminder).filter(models.Reminder.id == reminder_id).first()
+    if not reminder:
+        return {"error": "Reminder not found"}
+    reminder.is_active = False
+    db.commit()
+    return {"status": "deleted"}
+
+
+# ---------------------------------------------------------------------------
+# Day 23 — Conversation History
+# ---------------------------------------------------------------------------
+
+@app.get("/conversation-history")
+def get_conversation_history(
+    user_name: str,
+    page: int = 1,
+    page_size: int = 20,
+    db: Session = Depends(get_db),
+):
+    """Paginated conversation history for the user.
+    Returns messages ordered newest-first with role, text, emotion, and timestamp."""
+    user = get_or_create_user(db, user_name)
+    offset = (page - 1) * page_size
+
+    total = db.query(models.Conversation).filter(models.Conversation.user_id == user.id).count()
+
+    messages = (
+        db.query(models.Conversation)
+        .filter(models.Conversation.user_id == user.id)
+        .order_by(models.Conversation.created_at.desc())
+        .offset(offset)
+        .limit(page_size)
+        .all()
+    )
+
+    return {
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "messages": [
+            {
+                "id": m.id,
+                "role": m.role,
+                "message": m.message,
+                "emotion": m.emotion,
+                "timestamp": m.created_at.isoformat() if m.created_at else None,
+            }
+            for m in messages
+        ],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Day 26 — Health Diary
+# ---------------------------------------------------------------------------
+
+class DiaryEntry(BaseModel):
+    user_name: str
+    mood: str        # e.g. "good", "okay", "not well"
+    note: str = ""   # optional free-text note
+    energy: int = 3  # 1–5 scale
+
+
+@app.post("/health-diary")
+def add_diary_entry(entry: DiaryEntry, db: Session = Depends(get_db)):
+    """Save a daily health diary entry.
+    Stores it as a special 'diary' conversation entry for easy retrieval."""
+    user = get_or_create_user(db, entry.user_name)
+    text = f"[DIARY] mood={entry.mood} energy={entry.energy}/5 note={entry.note or 'none'}"
+    conv = models.Conversation(
+        user_id=user.id,
+        role="diary",
+        message=text,
+        emotion=entry.mood,
+    )
+    db.add(conv)
+    db.commit()
+    return {"status": "saved", "entry": text}
+
+
+@app.get("/health-diary")
+def get_diary_entries(user_name: str, days: int = 7, db: Session = Depends(get_db)):
+    """Return diary entries for the last N days."""
+    user = get_or_create_user(db, user_name)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    entries = (
+        db.query(models.Conversation)
+        .filter(
+            models.Conversation.user_id == user.id,
+            models.Conversation.role == "diary",
+            models.Conversation.created_at >= cutoff,
+        )
+        .order_by(models.Conversation.created_at.desc())
+        .all()
+    )
+    result = []
+    for e in entries:
+        parts = {}
+        for token in e.message.replace("[DIARY] ", "").split(" "):
+            if "=" in token:
+                k, v = token.split("=", 1)
+                parts[k] = v
+        result.append({
+            "date": e.created_at.strftime("%Y-%m-%d") if e.created_at else None,
+            "mood": parts.get("mood", ""),
+            "energy": parts.get("energy", ""),
+            "note": parts.get("note", ""),
+        })
+    return result

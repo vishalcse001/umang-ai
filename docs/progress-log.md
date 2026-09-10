@@ -128,3 +128,51 @@ Track kya complete hua.
 - [x] Added `GET /user-settings` and `POST /user-settings` to `main.py` to allow users to update their `family_email` from the new Settings UI.
 - [x] Refactored all UI text from casual Hinglish to a clean, **Professional English** terminology (e.g., "Avatar Chat", "Daily Briefing", "Emergency Contact").
 - [x] Fixed stale imports and minor bugs in `models.py` and `main.py` Request Models.
+
+## Day 19 — WebSocket Real-Time Streaming
+- [x] Replaced HTTP chunked streaming (`/chat-stream`) with a persistent **WebSocket endpoint** (`/ws/chat`) in `main.py`
+- [x] WebSocket streams AI reply token-by-token using `genai_client.models.generate_content_stream`, sending each chunk immediately as it arrives
+- [x] Added `__END__` sentinel frame so the frontend knows exactly when a reply is complete
+- [x] WebSocket connection is **persistent** — one connection per session, reused across messages (no reconnect overhead per message)
+- [x] Updated `App.jsx` to use `connectWebSocket()` helper — opens once on login, reconnects if dropped
+- [x] Frontend `sendTextMessage()` fully migrated to WebSocket: sends `{message, user_name}` JSON, accumulates tokens in real-time, updates UI as text arrives
+- [x] Graceful error handling in both backend (`WebSocketDisconnect` exception) and frontend (`ws.onerror` callback)
+- [x] Added `websockets` and `apscheduler` to `requirements.txt`; confirmed installed in venv
+
+## Day 20 — Proactive Check-in System
+- [x] Added `PendingCheckin` ORM model in `models.py` (fields: `user_id`, `message`, `checkin_type`, `is_delivered`, `created_at`)
+- [x] Implemented `generate_checkin_messages(checkin_type)` — creates morning/evening check-in rows for all registered users in DB, skipping duplicates for the same day
+- [x] Integrated **APScheduler** (`AsyncIOScheduler`) into FastAPI `lifespan` — morning cron at 08:00, evening cron at 18:00 fire automatically when server is running
+- [x] Added `GET /pending-checkins?user_name=...` — returns all undelivered check-in messages for a user, ordered by creation time
+- [x] Added `POST /pending-checkins/{id}/dismiss` — marks a check-in as `is_delivered=True` so it never appears again
+- [x] Updated `App.jsx` Home screen to fetch check-ins on login (`fetchCheckins()` triggered when `userName` is set)
+- [x] Added dismissible **notification banners** above the action grid on the Home dashboard — morning banners styled amber/warm, evening banners styled purple/indigo
+- [x] Added `checkin-banners`, `checkin-banner`, `checkin-morning/evening`, `checkin-dismiss` styles to `App.css` with slide-in animation
+
+## Day 21 — Family Dashboard
+- [x] Implemented `GET /family-dashboard` endpoint to aggregate user stats (negative emotion count, active reminders).
+- [x] Added 14-day mood trend visualization logic to backend.
+- [x] Added "Family Dashboard" card to the frontend action grid.
+- [x] Built the Dashboard UI in `App.jsx` to display stats, recent conversation history, and mood trends.
+
+## Day 22 — Emergency SOS & Reminder Management
+- [x] Added `POST /sos` endpoint to instantly send an emergency email to the registered family contact, bypassing emotion cooldowns.
+- [x] Added SOS UI section within the Settings view.
+- [x] Added `POST /reminders/{id}/complete` and `DELETE /reminders/{id}` endpoints.
+- [x] Updated Reminders frontend view to allow marking tasks as complete for the day or deleting them permanently.
+
+## Day 23 — Conversation History View
+- [x] Built `GET /conversation-history` endpoint with pagination support (20 messages per page).
+- [x] Added "Chat History" card to the frontend action grid.
+- [x] Created History view in `App.jsx` displaying past messages with timestamps and detected moods.
+- [x] Implemented Next/Prev pagination controls in the UI.
+
+## Day 24-25 — Code Refactoring & Preparation
+- [x] Resolved React `useEffect` exhaustive-deps warnings.
+- [x] Refactored frontend state into appropriate views.
+
+## Day 26 — Health Diary
+- [x] Implemented `POST /health-diary` and `GET /health-diary` to save and retrieve daily wellness logs.
+- [x] Health logs are stored as specialized conversation entries (role `diary`) to keep the DB schema simple.
+- [x] Added "Health Diary" card to the frontend action grid.
+- [x] Built a UI form with mood selection, a 1-5 energy slider, and a notes text area.
