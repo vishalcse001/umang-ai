@@ -176,3 +176,17 @@ Track kya complete hua.
 - [x] Health logs are stored as specialized conversation entries (role `diary`) to keep the DB schema simple.
 - [x] Added "Health Diary" card to the frontend action grid.
 - [x] Built a UI form with mood selection, a 1-5 energy slider, and a notes text area.
+
+## Day 27-28 — Progressive Web App (PWA) & Mobile Optimization
+- [x] Created `manifest.json` with theme branding (`#ff8a5c`), standalone display mode, and app icons.
+- [x] Implemented Service Worker (`sw.js`) with cache-first strategy for static assets and API bypass rules.
+- [x] Added PWA meta tags (`apple-mobile-web-app-capable`, `theme-color`, non-scalable viewport) to `index.html`.
+- [x] Registered Service Worker in `main.jsx` for production builds.
+
+## Day 29 — Performance Caching & Latency Optimization
+- [x] Implemented 15-minute in-memory caching for `fetch_daily_news` to save NewsAPI quota and reduce briefing latency.
+- [x] Optimized WebSocket connection lifecycle and reduced redundant DB queries.
+
+## Day 30 — Final Cleanup & Project Completion
+- [x] Verified zero ESLint errors and clean build output.
+- [x] Completed full 30-day feature set for Umang AI.

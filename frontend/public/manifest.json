@@ -1,0 +1,16 @@
+{
+  "short_name": "Umang AI",
+  "name": "Umang AI - Companion for Elderly",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "type": "image/svg+xml",
+      "sizes": "512x512"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#16171d",
+  "theme_color": "#ff8a5c",
+  "display": "standalone",
+  "orientation": "portrait"
+}

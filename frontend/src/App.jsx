@@ -1,8 +1,8 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import "./App.css";
 
-const API_BASE = "http://localhost:8000";
-const WS_BASE  = "ws://localhost:8000";
+const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
+const WS_BASE  = import.meta.env.VITE_WS_URL  || "ws://localhost:8000";
 
 function SendIcon() {
   return (
@@ -244,9 +244,9 @@ function App() {
       const data = await res.json();
       setSosStatus(data.status === "sent" ? "sent" : "error");
     } catch (e) {
-  console.error(e);
-  setSosStatus("error");
-}
+      console.error(e);
+      setSosStatus("error");
+    }
     setTimeout(() => setSosStatus("idle"), 5000);
   }
 
@@ -304,9 +304,9 @@ function App() {
       setDiaryStatus("saved");
       fetchDiaryEntries();
     } catch (e) {
-  console.error(e);
-  setSosStatus("error");
-}
+      console.error(e);
+      setDiaryStatus("error");
+    }
     setTimeout(() => setDiaryStatus("idle"), 3000);
   }
 
@@ -633,7 +633,11 @@ function App() {
         <div className="glow glow-2" />
 
         <div className="home-content">
-          <div className="home-top-bar">
+          <div className="home-header-row">
+            <div className="brand-badge">
+              <div className="brand-orb small" />
+              <span>Umang AI</span>
+            </div>
             <button className="icon-ghost-button" onClick={() => setView("settings")} title="Settings">
               <SettingsIcon />
             </button>

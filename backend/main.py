@@ -41,7 +41,8 @@ from google import genai as new_genai
 from google.genai.types import EmbedContentConfig, GenerateContentConfig
 
 from deepgram import DeepgramClient, PrerecordedOptions
-from elevenlabs.client import ElevenLabs
+import edge_tts
+
 
 from database import engine, Base, get_db, SessionLocal
 import models
@@ -122,7 +123,10 @@ app = FastAPI(title="Umang AI Backend", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=[
+        "http://localhost:5173",
+        os.getenv("FRONTEND_URL", ""),          # Set this on Render to your Vercel URL
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -172,8 +176,7 @@ emotion_model = genai.GenerativeModel(model_name="gemini-2.5-flash")
 genai_client = new_genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
 deepgram_client = DeepgramClient(os.getenv("DEEPGRAM_API_KEY"))
-elevenlabs_client = ElevenLabs(api_key=os.getenv("ELEVENLABS_API_KEY"))
-ELEVENLABS_VOICE_ID = "21m00Tcm4TlvDq8ikWAM"  # Rachel — clear, warm, works well for Hindi/Hinglish
+EDGE_TTS_VOICE = "hi-IN-SwaraNeural"  # warm female Hindi voice; "hi-IN-MadhurNeural" male ke liye
 
 # D-ID (avatar video generation) configuration.
 DID_API_KEY = os.getenv("DID_API_KEY")
@@ -204,8 +207,8 @@ ALERT_COOLDOWN_HOURS = 12
 # when a user has written in plain English, so we can explicitly instruct
 # the model to reply in English rather than relying on it to infer this.
 ENGLISH_HINT_WORDS = {
-    "hello", "hi", "hey", "how", "are", "you", "thanks", "thank", "please",
-    "yes", "no", "ok", "okay", "good", "morning", "evening", "night",
+    "how", "are", "you", "thanks", "thank", "please",
+    "yes", "no", "good", "morning", "evening", "night",
     "what", "when", "where", "why", "who", "fine", "great", "nice",
     "today", "tomorrow", "yesterday", "i", "am", "is", "the", "my", "your",
 }
@@ -313,12 +316,9 @@ def build_prompt_with_history(history, user_name: str, current_message: str) -> 
 
 
 def detect_language_hint(message: str) -> str:
-    """Fast, zero-API-call heuristic that flags clearly English messages,
-    so the prompt can explicitly instruct Gemini to reply in English.
-    This avoids the added latency of a separate classification call."""
     words = re.findall(r"[a-zA-Z']+", message.lower())
-    if not words:
-        return ""
+    if len(words) < 4:
+        return ""  # too short/ambiguous a message to confidently detect language
     english_matches = sum(1 for w in words if w in ENGLISH_HINT_WORDS)
     if english_matches / len(words) >= 0.5:
         return "[Respond in English only, with no Hindi words.] "
@@ -402,6 +402,14 @@ def build_knowledge_context(db: Session, query: str) -> str:
         context += f"- {row.topic}: {row.content}\n"
     return context
 
+async def synthesize_speech(text: str) -> bytes:
+    """Convert text to speech using Microsoft Edge's free TTS service (no API key needed)."""
+    communicate = edge_tts.Communicate(text, voice=EDGE_TTS_VOICE, rate="-8%")
+    audio_chunks = []
+    async for chunk in communicate.stream():
+        if chunk["type"] == "audio":
+            audio_chunks.append(chunk["data"])
+    return b"".join(audio_chunks)
 
 def generate_avatar_video(text_to_speak: str) -> str:
     """Send text to D-ID to generate a lip-synced avatar video and poll
@@ -434,11 +442,16 @@ def generate_avatar_video(text_to_speak: str) -> str:
         time.sleep(3)
 
 
+_news_cache = {"timestamp": 0, "articles": []}
+
 def fetch_daily_news(limit: int = 5) -> list:
-    """Fetch recent India-relevant news headlines from NewsAPI. Uses the
-    /everything endpoint with a keyword search rather than /top-headlines
-    with a country filter, since the free tier has very limited source
-    coverage for India-specific top-headlines."""
+    """Fetch recent India-relevant news headlines from NewsAPI. Uses an in-memory cache
+    (15 min TTL) to minimize API latency and save quota."""
+    global _news_cache
+    now = time.time()
+    if _news_cache["articles"] and (now - _news_cache["timestamp"] < 900):
+        return _news_cache["articles"][:limit]
+
     params = {
         "apiKey": NEWS_API_KEY,
         "q": "India",
@@ -453,7 +466,9 @@ def fetch_daily_news(limit: int = 5) -> list:
         raise Exception(f"NewsAPI error: {data.get('code')} - {data.get('message')}")
 
     articles = data.get("articles", [])
-    return [{"title": a["title"], "description": a.get("description") or ""} for a in articles]
+    formatted = [{"title": a["title"], "description": a.get("description") or ""} for a in articles]
+    _news_cache = {"timestamp": now, "articles": formatted}
+    return formatted[:limit]
 
 
 def summarize_news_for_elderly(articles: list, user_name: str) -> str:
@@ -470,7 +485,7 @@ def summarize_news_for_elderly(articles: list, user_name: str) -> str:
         "Mushkil words avoid karo, aur bahut lambi na ho — 4-5 khabar chhote mein cover karo."
     )
     response = gemini_model.generate_content(prompt)
-    return response.text
+    return response.text 
 
 
 def send_family_alert_email(family_email: str, user_name: str):
@@ -745,14 +760,8 @@ async def voice_chat(
     # instead of sending an empty message to Gemini.
     if not user_message or not user_message.strip():
         fallback_text = "Maaf kijiye, mujhe aapki baat sunai nahi di. Kya aap dobara bol sakte hain?"
-        audio_stream = elevenlabs_client.text_to_speech.convert(
-            voice_id=ELEVENLABS_VOICE_ID,
-            text=fallback_text,
-            model_id="eleven_multilingual_v2"
-        )
-        audio_bytes = b"".join(audio_stream)
+        audio_bytes = await synthesize_speech(fallback_text)
         return Response(content=audio_bytes, media_type="audio/mpeg")
-
     # Step 2: Detect emotional tone, load user + conversation history + knowledge context.
     detected_emotion = detect_emotion(user_message)
     user = get_or_create_user(db, user_name)
@@ -777,12 +786,7 @@ async def voice_chat(
     check_and_trigger_family_alert(db, user)
 
     # Step 5: Convert the AI's reply to speech and return it.
-    audio_stream = elevenlabs_client.text_to_speech.convert(
-        voice_id=ELEVENLABS_VOICE_ID,
-        text=ai_reply,
-        model_id="eleven_multilingual_v2"
-    )
-    audio_bytes = b"".join(audio_stream)
+    audio_bytes = await synthesize_speech(ai_reply)
 
     return Response(content=audio_bytes, media_type="audio/mpeg")
 
