@@ -58,7 +58,8 @@ scheduler = AsyncIOScheduler()
 
 def generate_checkin_messages(checkin_type: str):
     """Background job: generate a proactive check-in message for every user
-    and store it as a PendingCheckin. The user sees it on their next app open."""
+    and store it as a PendingCheckin. The user sees it on their next app open.
+    Only mentions medicines/reminders if the user actually has active reminders set up."""
     db = SessionLocal()
     try:
         users = db.query(models.User).all()
@@ -77,16 +78,40 @@ def generate_checkin_messages(checkin_type: str):
             if already_exists:
                 continue
 
+            # Check if this user has any active reminders
+            active_reminders = (
+                db.query(models.Reminder)
+                .filter(models.Reminder.user_id == user.id, models.Reminder.is_active == True)
+                .all()
+            )
+            has_reminders = len(active_reminders) > 0
+
+            # Build a list of reminder titles for personalised message
+            reminder_titles = [r.title for r in active_reminders[:3]]  # max 3 to keep it short
+            reminder_text = ", ".join(reminder_titles) if reminder_titles else ""
+
             if checkin_type == "morning":
-                message = (
-                    f"Good morning, {user.name}! 🌅 Hope you slept well. "
-                    "Have you taken your morning medicines? I'm here if you'd like to chat."
-                )
+                if has_reminders:
+                    message = (
+                        f"Good morning, {user.name}! 🌅 Hope you slept well. "
+                        f"Remember to take care of: {reminder_text}. I'm here if you'd like to chat."
+                    )
+                else:
+                    message = (
+                        f"Good morning, {user.name}! 🌅 Hope you had a restful night. "
+                        "How are you feeling today? I'm here whenever you'd like to talk."
+                    )
             else:
-                message = (
-                    f"Good evening, {user.name}! 🌇 How was your day? "
-                    "Don't forget your evening medicines. I'm always here to listen."
-                )
+                if has_reminders:
+                    message = (
+                        f"Good evening, {user.name}! 🌇 How was your day? "
+                        f"Just a gentle reminder about: {reminder_text}. I'm always here to listen."
+                    )
+                else:
+                    message = (
+                        f"Good evening, {user.name}! 🌙 How was your day? "
+                        "I hope it was a good one. Feel free to share anything on your mind."
+                    )
 
             checkin = models.PendingCheckin(
                 user_id=user.id,
