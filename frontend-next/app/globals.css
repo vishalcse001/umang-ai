@@ -1,0 +1,134 @@
+@import url("https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&family=Inter:wght@400;500;600&display=swap");
+@import "tailwindcss";
+
+:root {
+  --accent: #ff8a5c;
+  --accent-deep: #ea580c;
+  --purple: #a855f7;
+  --glass-bg: rgba(255, 255, 255, 0.04);
+  --glass-border: rgba(255, 255, 255, 0.12);
+  --text-muted: #9ca3af;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+  background: #09080e;
+  color: #f3f4f6;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+
+h1, h2, h3 {
+  font-family: "Poppins", sans-serif;
+  letter-spacing: -0.02em;
+}
+
+/* ── Scrollbar ─────────────────────────────────────── */
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,138,92,0.3); border-radius: 10px; }
+
+/* ── Glass Card ─────────────────────────────────────── */
+.glass {
+  background: var(--glass-bg);
+  backdrop-filter: blur(32px);
+  -webkit-backdrop-filter: blur(32px);
+  border: 1px solid var(--glass-border);
+  box-shadow: 0 30px 80px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.1);
+}
+
+/* ── Gradient Text ──────────────────────────────────── */
+.gradient-text {
+  background: linear-gradient(135deg, #ffffff 30%, #ffcba3 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* ── Primary Button ─────────────────────────────────── */
+.btn-primary {
+  background: linear-gradient(135deg, #ff8a5c, #ea580c);
+  color: white;
+  font-weight: 600;
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 10px 24px rgba(234,88,12,0.35);
+  transition: all 0.2s cubic-bezier(0.16,1,0.3,1);
+}
+.btn-primary:hover { transform: translateY(-2px); box-shadow: 0 16px 32px rgba(234,88,12,0.45); }
+.btn-primary:active { transform: translateY(0) scale(0.97); }
+
+/* ── Ghost Icon Button ──────────────────────────────── */
+.btn-ghost {
+  background: rgba(255,255,255,0.06);
+  border: none;
+  color: #f3f4f6;
+  cursor: pointer;
+  transition: background 0.2s;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+}
+.btn-ghost:hover { background: rgba(255,255,255,0.14); }
+
+/* ── Input ──────────────────────────────────────────── */
+.input-base {
+  width: 100%;
+  padding: 12px 16px;
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,0.1);
+  background: rgba(255,255,255,0.05);
+  color: #f3f4f6;
+  font-family: "Inter", sans-serif;
+  font-size: 15px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+.input-base:focus { border-color: #ff8a5c; }
+.input-base::placeholder { color: #6b7280; }
+
+/* ── Voice Orb ──────────────────────────────────────── */
+@keyframes orbPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255,138,92,0.5), 0 0 60px rgba(255,138,92,0.2); }
+  50% { box-shadow: 0 0 0 24px rgba(255,138,92,0), 0 0 80px rgba(255,138,92,0.3); }
+}
+.orb-pulse { animation: orbPulse 2s ease-in-out infinite; }
+
+@keyframes rotate {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+.spin-slow { animation: rotate 6s linear infinite; }
+
+/* ── Typing dots ────────────────────────────────────── */
+@keyframes bounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.5; }
+  30% { transform: translateY(-6px); opacity: 1; }
+}
+.typing-dot { animation: bounce 1.2s infinite; border-radius: 50%; background: #9ca3af; }
+.typing-dot:nth-child(2) { animation-delay: 0.2s; }
+.typing-dot:nth-child(3) { animation-delay: 0.4s; }
+
+/* ── Status dot ─────────────────────────────────────── */
+@keyframes statusPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(16,185,129,0.5); }
+  50% { box-shadow: 0 0 0 4px rgba(16,185,129,0); }
+}
+.status-online { background: #10b981; animation: statusPulse 2s infinite; }
+
+/* ── SOS pulse ──────────────────────────────────────── */
+@keyframes sosPulse {
+  0% { box-shadow: 0 0 0 0 rgba(239,68,68,0.7); }
+  70% { box-shadow: 0 0 0 12px rgba(239,68,68,0); }
+  100% { box-shadow: 0 0 0 0 rgba(239,68,68,0); }
+}
+.sos-pulse { animation: sosPulse 1.5s infinite; }
+
+/* ── Check-in banner slide ──────────────────────────── */
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.banner-slide { animation: slideDown 0.35s ease; }
