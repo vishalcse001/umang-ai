@@ -105,6 +105,9 @@ function App() {
   const [isSending, setIsSending] = useState(false);
   const [voiceState, setVoiceState] = useState("idle");
 
+  // Live clock state
+  const [currentTime, setCurrentTime] = useState(new Date());
+
   // Avatar states
   const [avatarInput, setAvatarInput] = useState("");
   const [avatarStatus, setAvatarStatus] = useState("idle");
@@ -198,6 +201,31 @@ function App() {
     return () => stopMoodCamera();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, userName]);
+
+  // Live clock — updates every minute
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(new Date()), 60000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // Returns time-of-day greeting + emoji based on current hour
+  function getTimeGreeting() {
+    const hour = currentTime.getHours();
+    if (hour >= 5 && hour < 12)  return { text: "Good Morning", emoji: "🌅", sub: "Hope you slept well!" };
+    if (hour >= 12 && hour < 17) return { text: "Good Afternoon", emoji: "☀️", sub: "How's your day going?" };
+    if (hour >= 17 && hour < 21) return { text: "Good Evening", emoji: "🌇", sub: "Time to relax and unwind." };
+    return { text: "Good Night", emoji: "🌙", sub: "Rest well, take care of yourself." };
+  }
+
+  // Returns formatted live time string e.g. "3:45 PM"
+  function getLiveTime() {
+    return currentTime.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
+  }
+
+  // Returns formatted date e.g. "Wednesday, 24 Sep"
+  function getLiveDate() {
+    return currentTime.toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "short" });
+  }
 
   async function fetchCheckins() {
     try {
@@ -638,13 +666,19 @@ function App() {
               <div className="brand-orb small" />
               <span>Umang AI</span>
             </div>
+            <div className="live-clock">
+              <span className="live-time">{getLiveTime()}</span>
+              <span className="live-date">{getLiveDate()}</span>
+            </div>
             <button className="icon-ghost-button" onClick={() => setView("settings")} title="Settings">
               <SettingsIcon />
             </button>
           </div>
 
-          <h1 className="greeting">Welcome, {userName}</h1>
-          <p className="greeting-sub">How can Umang assist you today?</p>
+          <h1 className="greeting">
+            {getTimeGreeting().emoji} {getTimeGreeting().text}, {userName}
+          </h1>
+          <p className="greeting-sub">{getTimeGreeting().sub}</p>
 
           {/* Proactive Check-in Banners */}
           {checkins.length > 0 && (

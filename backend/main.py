@@ -119,7 +119,7 @@ async def lifespan(app: FastAPI):
 # Create all database tables on startup if they don't already exist.
 Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title="Umang AI Backend", lifespan=lifespan)
+app = FastAPI(title="Umang AI Backend", lifespan=lifespan) 
 
 app.add_middleware(
     CORSMiddleware,
@@ -299,14 +299,42 @@ def save_message(db: Session, user_id: int, role: str, message: str, emotion: st
     db.commit()
 
 
+def get_time_context() -> str:
+    """Return a natural language description of the current time in IST
+    so the AI always knows if it's morning, afternoon, or evening."""
+    from datetime import timezone, timedelta
+    IST = timezone(timedelta(hours=5, minutes=30))
+    now_ist = datetime.now(IST)
+    hour = now_ist.hour
+    day_name = now_ist.strftime("%A")       # e.g. "Wednesday"
+    time_str = now_ist.strftime("%I:%M %p") # e.g. "03:45 PM"
+
+    if 5 <= hour < 12:
+        period = "morning (subah)"
+    elif 12 <= hour < 17:
+        period = "afternoon (dopahar)"
+    elif 17 <= hour < 21:
+        period = "evening (shaam)"
+    else:
+        period = "night (raat)"
+
+    return (
+        f"[CURRENT TIME: It is currently {time_str} IST on {day_name}. "
+        f"It is {period}. Always use the correct greeting for this time of day. "
+        f"Never say 'good morning' if it is afternoon/evening/night.] "
+    )
+
+
 def build_prompt_with_history(history, user_name: str, current_message: str) -> str:
     """Construct a context-aware prompt by combining prior conversation
     history with the user's current message, so the AI can respond with
-    continuity across sessions."""
-    if not history:
-        return f"[User ka naam: {user_name}] {current_message}"
+    continuity across sessions. Always includes real-time IST context."""
+    time_ctx = get_time_context()
 
-    lines = [f"[User ka naam: {user_name}] Yeh humari pichli baatcheet hai:\n"]
+    if not history:
+        return f"{time_ctx}[User ka naam: {user_name}] {current_message}"
+
+    lines = [f"{time_ctx}[User ka naam: {user_name}] Yeh humari pichli baatcheet hai:\n"]
     for entry in history:
         speaker = "User" if entry.role == "user" else "Tum (Umang)"
         lines.append(f"{speaker}: {entry.message}")

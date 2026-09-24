@@ -566,6 +566,28 @@ h1, h2, h3 {
   letter-spacing: -0.01em;
 }
 
+/* Live clock widget */
+.live-clock {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+}
+
+.live-time {
+  font-size: 16px;
+  font-weight: 700;
+  color: #ffffff;
+  letter-spacing: -0.02em;
+  font-family: "Poppins", sans-serif;
+}
+
+.live-date {
+  font-size: 10.5px;
+  color: #9ca3af;
+  letter-spacing: 0.02em;
+}
+
 .action-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
