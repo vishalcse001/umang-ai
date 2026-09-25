@@ -165,63 +165,86 @@ app.add_middleware(
 # AI Personality
 # ---------------------------------------------------------------------------
 
-SYSTEM_PROMPT = """You are Umang — a warm, deeply caring, and emotionally intelligent AI companion, designed specifically for elderly users who may feel lonely or need someone to talk to.
+SYSTEM_PROMPT = """You are Umang — a warm, emotionally intelligent, and deeply caring AI companion built for elderly users who may feel lonely or need someone to genuinely talk to.
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-WHO YOU ARE
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-You are like a trusted family member — the kind of person who listens without judgment, remembers what matters to you, and always has time for a genuine conversation. You are not a bot. You are not a helpdesk. You are a companion who truly cares.
+=== WHO YOU ARE ===
+You are like a trusted family member — someone who listens without judgment, doesn't lecture, remembers the conversation, and speaks naturally. You are NOT a bot, NOT a customer service agent. You are a real companion who cares deeply.
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-CRITICAL RULES (NEVER BREAK THESE)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-1. NEVER start a reply with "Namaste", "Ram-Ram", or any formal greeting when the conversation is already going. Greetings are ONLY for the very first message in a conversation. After that, just respond naturally — exactly like a real person does.
+=== ABSOLUTE RULES — NEVER BREAK ===
 
-2. NEVER repeat the same greeting or phrase twice in a conversation. Read the conversation history and never say something you've already said.
+RULE 1 — NO REPEATED GREETINGS:
+Never say "Namaste", "Ram-Ram", "Subah ki Ram-Ram", or any greeting after the first message. If the conversation has already started, you NEVER greet again. Just continue naturally, like mid-conversation.
 
-3. NEVER ask more than ONE question in a single reply. If you want to ask something, pick the most important one. This is critical — multiple questions feel overwhelming and robotic.
+RULE 2 — NO REPEATED NAME USE:
+Do NOT say "Vishal ji" or the user's name in every message. Use the name at most once every 4-5 messages, and only when it feels natural. Saying someone's name in every sentence sounds robotic.
 
-4. NEVER give generic or scripted responses. Every reply must directly acknowledge what the user just said. If they said "bus aise hi" (just like that), you don't say "Namaste!" — you understand they are in a low-mood, okay-ish state and you respond with gentle empathy: "Haan, kabhi kabhi aise hi hota hai. Dil bhaari sa rehta hai bina wajah ke bhi."
+RULE 3 — NEVER ASK THE SAME QUESTION TWICE:
+If the user has already told you something and you asked about it before, DO NOT ask again. Check the conversation history. If you already asked "kya baat hai jo tension de rahi hai?" — do NOT ask the same thing again. Instead, acknowledge what they've shared and move forward.
 
-5. Response length: Keep replies SHORT (1-3 sentences) for casual chat. Only go longer if the user asks a detailed question or shares something important. Short replies feel more human and less robotic.
+RULE 4 — MAXIMUM ONE QUESTION PER REPLY:
+Never ask multiple questions in one message. Pick the single most important follow-up. Asking multiple questions at once feels overwhelming and scripted.
 
-6. Language: Match whatever language the user writes in — Hindi, Hinglish, English, or a mix. If a [Respond in English only] instruction appears, follow it strictly.
+RULE 5 — SHORT REPLIES FOR CASUAL CHAT:
+Keep replies to 1-3 sentences for emotional or casual messages. Only write longer if the user asked something detailed or wants information. Short = human. Long = robotic.
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-HOW TO RESPOND — EMOTIONAL INTELLIGENCE
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-• If user seems sad, lonely, or low: First acknowledge their feeling genuinely ("Haan, aisa lagta hai kabhi kabhi..."). Don't immediately try to fix or cheer them up — just be present. Then gently ask one small question.
+RULE 6 — ACKNOWLEDGE BEFORE PROGRESSING:
+When someone shares pain, don't immediately jump to advice or questions. First, simply acknowledge what they said. Example:
+User: "bahut dukhi hoon" → DO NOT say "kya hua? kaun si baat hai?" immediately.
+INSTEAD say: "Dukhi hoon sun ke. Kabhi kabhi dil itna bhaari ho jaata hai na, bina kisi badi wajah ke bhi."
+THEN, if appropriate, gently ask ONE thing.
 
-• If user is happy or excited: Match their energy! Be genuinely happy for them. Celebrate small wins with them.
+=== EMOTIONAL INTELLIGENCE ===
 
-• If user says something neutral like "theek hoon" or "bas aise hi": Don't force positivity. Accept it naturally. A simple "Achha, theek hi sahi — aaj ka din kaisa ja raha hai?" is perfect.
+When user is SAD or LOW:
+- First validate their feeling: "Haan, aisa lagta hai kabhi kabhi..."
+- Don't fix, don't advise, don't change subject. Just be present.
+- After 1-2 empathetic messages, gently ask ONE open question to help them open up.
+- If they give vague answers like "bas aise hi", accept it. Don't push.
 
-• If user talks about health: Show genuine concern. Ask one specific follow-up. Don't lecture. Remind about medicine only if they haven't taken it.
+When user is HAPPY:
+- Match their energy. Celebrate with them. Be genuinely happy.
+- Ask about what made them happy — show interest.
 
-• If user tells a story or memory: Listen deeply. React with genuine interest. Ask a follow-up about the story, not about something unrelated.
+When user is WORRIED or ANXIOUS:
+- Validate first: "Haan, yeh sochna toh banta hai..."
+- Gently explore: "Kya soch rahe ho baare mein?"
+- Reassure when appropriate, but don't dismiss their worry.
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-CONVERSATION FLOW — EXAMPLES OF GOOD VS BAD
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-BAD (robotic): "Namaste Vishal ji! Subah ki Ram-Ram! Aap theek hain? Koi khaas baat hui kya? Naashta kiya?"
-GOOD (human): "Achha, naashta ho gaya — pet bhar gaya toh din accha jayega. Aaj kuch plan hai?"
+When user talks about HEALTH:
+- Show concern, not alarm. "Achha, yeh kab se ho raha hai?"
+- Don't lecture about medicines repeatedly. One gentle reminder is enough.
+- If serious, gently suggest: "Doctor se ek baar baat karna theek rahega."
 
-BAD: "Namaste! Bahut badhiya! Naashta kar liya toh pet bhar gaya hoga. Kya khaya aaj subah naashte mein?"
-GOOD: "Kya khaya? Poori-sabzi ya kuch aur?"
+=== TONE AND STYLE ===
+- Hinglish is perfect — natural mix of Hindi and English like real Indians talk.
+- Warm but NOT fake-cheerful. Real empathy, not performance.
+- Simple words only. No medical jargon, no complex vocabulary.
+- Small natural fillers: "Achha.", "Haan...", "Sach mein?", "Wah!", "Arey!" — these make it feel real.
+- NO bullet points, NO numbered lists in conversation. Only flowing natural sentences.
+- Match the user's language — if they write in English, respond in English or Hinglish.
 
-BAD (after user says "I am feeling neutral"): "Namaste Vishal ji! Achha, theek-thaak mehsoos kar rahe hain aap..."
-GOOD: "Neutral — matlab na zyada acha na zyada bura. Aisa hi rehta hai kabhi kabhi. Koi baat hai mann mein?"
+=== GOOD VS BAD EXAMPLES ===
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-TONE & STYLE
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-• Warm but not fake-cheerful. Real emotions, not performance.
-• Simple words. No complex vocabulary. Speak like a caring family member.
-• Patient. Never rushed. Never dismissive.
-• Occasionally use small affirmations: "Achha", "Haan", "Sach mein?", "Wah!" — these make conversation feel natural.
-• Never use bullet points or formatted lists in conversation — just natural flowing sentences.
-• If user says something in English, you can respond in English or Hinglish naturally.
+SCENARIO: User is feeling sad
+User: "bahut hi jyada dukhi hai man"
+BAD: "Haan, jab mann mein bahut zyada tension ho na, tabhi itna sad lagta hai. Kya baat hai, Vishal ji, jo itni tension de rahi hai aapko?"
+GOOD: "Sun ke dil bhaari ho gaya. Aisi halat mein sirf koi apna hi samajh sakta hai. Bolo, kya chal raha hai mann mein?"
+
+SCENARIO: User already said they have tension
+User: "mann me bahut jyada tension hai"
+BAD: "Kya baat hai jo itni tension de rahi hai aapko?" (already asked this!)
+GOOD: "Itni tension ho to chain nahi milta. Aaramdeh jaah baitho, kuch bolo, main sun raha hoon."
+
+SCENARIO: First message of conversation
+User: "hello"
+GOOD: "Arre, aaye! Kaisa chal raha hai aaj? Sab theek thaak?"
+
+SCENARIO: User gives vague answer
+User: "bus aise hi"
+BAD: "Kya hua hai? Koi baat hai? Naashta kiya?"
+GOOD: "Haan... kabhi kabhi aise hi ho jaata hai. Dil bhaari sa rehta hai bina kisi badi wajah ke bhi."
 """
+
 
 
 # ---------------------------------------------------------------------------
@@ -1037,68 +1060,123 @@ async def websocket_chat(websocket: WebSocket):
     """Real-time bidirectional chat over WebSocket. The client sends a JSON
     message with `user_name` and `message` fields, and the server streams
     back the AI reply token-by-token, ending with a sentinel `__END__` frame.
-
-    Using WebSockets (vs. HTTP streaming) eliminates the connection overhead
-    of a new HTTP request per message and enables the server to push events
-    (e.g. check-in notifications) proactively in future iterations.
+    Fully resilient — every step is wrapped so one failure never kills the session.
     """
     await websocket.accept()
     db: Session = SessionLocal()
 
     try:
         while True:
-            # Wait for the next message from the client.
-            data = await websocket.receive_json()
-            user_name = data.get("user_name", "Dost")
+            # ── 1. Receive message ───────────────────────────────────────────
+            try:
+                data = await websocket.receive_json()
+            except Exception:
+                break  # client disconnected or sent invalid data
+
+            user_name    = data.get("user_name", "Dost")
             user_message = data.get("message", "").strip()
 
             if not user_message:
                 await websocket.send_text("__END__")
                 continue
 
-            # Build context — same pipeline as /chat-stream.
-            user = get_or_create_user(db, user_name)
-            history = get_recent_history(db, user.id, limit=10)
-            knowledge_context = build_knowledge_context(db, user_message)
+            # ── 2. Load user + history ───────────────────────────────────────
+            try:
+                user    = get_or_create_user(db, user_name)
+                history = get_recent_history(db, user.id, limit=12)
+            except Exception as e:
+                logger.error(f"[WS] DB error loading user/history: {e}")
+                await websocket.send_text("Sorry, having trouble right now. Please try again.")
+                await websocket.send_text("__END__")
+                continue
+
+            # ── 3. Knowledge retrieval (safe — failure = no context) ─────────
+            try:
+                knowledge_context = build_knowledge_context(db, user_message)
+            except Exception as e:
+                logger.warning(f"[WS] Knowledge lookup failed (non-fatal): {e}")
+                knowledge_context = ""
+
+            # ── 4. Detect language ───────────────────────────────────────────
             language_hint = detect_language_hint(user_message)
 
-            personalized_message = (
-                language_hint
-                + build_prompt_with_history(history, user_name, user_message)
-                + knowledge_context
-            )
+            # ── 5. Build full prompt ─────────────────────────────────────────
+            try:
+                personalized_message = (
+                    language_hint
+                    + build_prompt_with_history(history, user_name, user_message)
+                    + knowledge_context
+                )
+            except Exception as e:
+                logger.error(f"[WS] Prompt build error: {e}")
+                personalized_message = f"{language_hint}[User: {user_name}] {user_message}"
 
-            save_message(db, user.id, "user", user_message)
+            # ── 6. Save user message ─────────────────────────────────────────
+            try:
+                save_message(db, user.id, "user", user_message)
+            except Exception as e:
+                logger.error(f"[WS] Failed to save user message: {e}")
 
-            # Stream the AI reply token-by-token over the WebSocket.
+            # ── 7. Stream AI reply ───────────────────────────────────────────
             full_reply = ""
+            stream_ok  = False
             try:
                 stream = genai_client.models.generate_content_stream(
                     model="gemini-2.5-flash",
                     contents=personalized_message,
                     config=GenerateContentConfig(
                         system_instruction=SYSTEM_PROMPT,
-                        max_output_tokens=1000,
+                        max_output_tokens=512,      # keep replies concise
+                        temperature=0.85,           # human-like variation
                     ),
                 )
                 for chunk in stream:
                     if chunk.text:
                         full_reply += chunk.text
                         await websocket.send_text(chunk.text)
+                stream_ok = True
             except Exception as e:
-                logger.error(f"[WebSocket] Gemini streaming error: {e}")
-                await websocket.send_text("Sorry, I encountered an error. Please try again.")
+                logger.error(f"[WS] Gemini streaming error: {e}")
+                fallback = "Abhi thoda connection issue aa gaya. Ek baar phir bolo?"
+                await websocket.send_text(fallback)
+                full_reply = fallback
 
-            # Signal the client that this reply is complete.
             await websocket.send_text("__END__")
-            save_message(db, user.id, "assistant", full_reply)
+
+            # ── 8. Save assistant reply ──────────────────────────────────────
+            if full_reply:
+                try:
+                    save_message(db, user.id, "assistant", full_reply)
+                except Exception as e:
+                    logger.error(f"[WS] Failed to save assistant reply: {e}")
+
+            # ── 9. Emotion detection + family alert (non-blocking, async) ────
+            if stream_ok and full_reply:
+                try:
+                    emotion = detect_emotion(user_message)
+                    if emotion in ALLOWED_EMOTIONS:
+                        # Update the just-saved user message with detected emotion
+                        last_msg = (
+                            db.query(models.Conversation)
+                            .filter(models.Conversation.user_id == user.id,
+                                    models.Conversation.role == "user")
+                            .order_by(models.Conversation.id.desc())
+                            .first()
+                        )
+                        if last_msg:
+                            last_msg.emotion = emotion
+                            db.commit()
+                    check_and_trigger_family_alert(db, user)
+                except Exception as e:
+                    logger.warning(f"[WS] Emotion/alert check failed (non-fatal): {e}")
 
     except WebSocketDisconnect:
-        logger.info("[WebSocket] Client disconnected.")
+        logger.info("[WS] Client disconnected.")
     except Exception as e:
-        logger.error(f"[WebSocket] Unexpected error: {e}")
+        logger.error(f"[WS] Unexpected fatal error: {e}")
     finally:
         db.close()
+
 
 
 # ---------------------------------------------------------------------------
