@@ -256,13 +256,13 @@ genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 # Main conversational model, driven by Umang's personality. Used by the
 # non-streaming endpoints (/voice-chat, /avatar-chat, /daily-news).
 gemini_model = genai.GenerativeModel(
-    model_name="gemini-2.5-flash",
+    model_name="gemini-1.5-flash",
     system_instruction=SYSTEM_PROMPT,
 )
 
 # A lightweight, personality-free model instance used only for emotion
 # classification, kept separate from the main conversational model.
-emotion_model = genai.GenerativeModel(model_name="gemini-2.5-flash")
+emotion_model = genai.GenerativeModel(model_name="gemini-1.5-flash")
 
 # Client for the newer Google GenAI SDK. Used for embeddings (the legacy
 # `google.generativeai` package no longer supports embedding models) and
@@ -804,7 +804,7 @@ def chat_stream(request: ChatRequest, db: Session = Depends(get_db)):
     def stream_response():
         full_reply = ""
         stream = genai_client.models.generate_content_stream(
-            model="gemini-2.5-flash",
+            model="gemini-1.5-flash",
             contents=personalized_message,
             config=GenerateContentConfig(system_instruction=SYSTEM_PROMPT, max_output_tokens=200),
         )
@@ -1122,7 +1122,7 @@ async def websocket_chat(websocket: WebSocket):
             stream_ok  = False
             try:
                 stream = genai_client.models.generate_content_stream(
-                    model="gemini-2.5-flash",
+                    model="gemini-1.5-flash",
                     contents=personalized_message,
                     config=GenerateContentConfig(
                         system_instruction=SYSTEM_PROMPT,
