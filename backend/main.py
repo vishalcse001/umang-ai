@@ -16,6 +16,7 @@ import smtplib
 import logging
 from contextlib import asynccontextmanager
 from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta, timezone, date
 
 from xml.sax.saxutils import escape as xml_escape
@@ -149,8 +150,9 @@ app = FastAPI(title="Umang AI Backend", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://localhost:5173",
-        os.getenv("FRONTEND_URL", ""),          # Set this on Render to your Vercel URL
+        "http://localhost:5173",   # Old React/Vite frontend
+        "http://localhost:3000",   # New Next.js frontend
+        os.getenv("FRONTEND_URL", ""),  # Production Vercel URL
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -541,26 +543,57 @@ def summarize_news_for_elderly(articles: list, user_name: str) -> str:
     return response.text 
 
 
+def send_email(to_address: str, subject: str, text_body: str, html_body: str):
+    """Shared helper: sends a HTML+text multipart email via Gmail SMTP SSL.
+    Using MIMEMultipart alternative ensures better inbox deliverability."""
+    if not EMAIL_ADDRESS or not EMAIL_APP_PASSWORD:
+        logger.error("[Email] EMAIL_ADDRESS or EMAIL_APP_PASSWORD not set in environment.")
+        raise ValueError("Email credentials not configured.")
+
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"]    = f"Umang AI <{EMAIL_ADDRESS}>"
+    msg["To"]      = to_address
+    msg["X-Mailer"] = "Umang AI Safety System"
+    msg.attach(MIMEText(text_body, "plain", "utf-8"))
+    msg.attach(MIMEText(html_body, "html", "utf-8"))
+
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+        server.login(EMAIL_ADDRESS, EMAIL_APP_PASSWORD)
+        server.sendmail(EMAIL_ADDRESS, to_address, msg.as_string())
+
+
 def send_family_alert_email(family_email: str, user_name: str):
     """Notify a registered family member that the user has shown signs of
     persistent sadness or loneliness in recent conversations."""
     subject = f"Umang AI: A note about {user_name}"
-    body = (
+    text_body = (
         f"Namaste,\n\n"
         f"This is an automated note from Umang AI. {user_name} has seemed a little "
         f"down or lonely in their recent conversations with their companion app.\n\n"
         f"It might be a good time for a call or a visit — sometimes that's all it takes.\n\n"
         f"With care,\nUmang AI"
     )
-
-    message = MIMEText(body)
-    message["Subject"] = subject
-    message["From"] = EMAIL_ADDRESS
-    message["To"] = family_email
-
-    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-        server.login(EMAIL_ADDRESS, EMAIL_APP_PASSWORD)
-        server.sendmail(EMAIL_ADDRESS, family_email, message.as_string())
+    html_body = f"""
+    <div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden;border:1px solid #e5e7eb;">
+      <div style="background:linear-gradient(135deg,#ff8a5c,#ea580c);padding:28px 32px;">
+        <h1 style="color:#fff;margin:0;font-size:22px;">🌼 Umang AI — Wellness Note</h1>
+      </div>
+      <div style="padding:28px 32px;">
+        <p style="color:#374151;font-size:16px;line-height:1.6;">Namaste,</p>
+        <p style="color:#374151;font-size:15px;line-height:1.7;">
+          This is a gentle note from <strong>Umang AI</strong>. 
+          <strong>{user_name}</strong> has seemed a little down or lonely 
+          in their recent conversations with the app.
+        </p>
+        <p style="color:#374151;font-size:15px;line-height:1.7;">
+          It might be a good time for a call or a visit — sometimes that's all it takes. 💙
+        </p>
+        <p style="color:#6b7280;font-size:13px;margin-top:24px;">With care,<br/><strong>Umang AI Safety System</strong></p>
+      </div>
+    </div>
+    """
+    send_email(family_email, subject, text_body, html_body)
 
 
 def check_and_trigger_family_alert(db: Session, user: models.User):
@@ -1097,7 +1130,9 @@ def family_dashboard(user_name: str, db: Session = Depends(get_db)):
         "mood_trend": mood_trend,
         "recent_messages": messages_data,
         "active_reminders": reminders_data,
+        "active_reminders_count": len(reminders_data),          # frontend reads this
         "negative_emotion_count_7d": negative_count,
+        "negative_emotions_count": negative_count,               # frontend reads this
     }
 
 
@@ -1119,26 +1154,40 @@ def trigger_sos(request: SOSRequest, db: Session = Depends(get_db)):
     if not user.family_email:
         return {"status": "error", "message": "No family email registered. Please add one in Settings."}
 
-    subject = f"🚨 URGENT: {user.name} needs immediate help — Umang AI SOS"
-    body = (
-        f"Dear Family Member,\n\n"
-        f"This is an URGENT SOS alert from Umang AI.\n\n"
-        f"{user.name} has manually triggered an emergency alert at {datetime.now().strftime('%d %b %Y, %I:%M %p')}.\n\n"
-        f"Message from {user.name}:\n\"{request.message}\"\n\n"
-        f"Please contact them immediately.\n\n"
+    now_str = datetime.now().strftime("%d %b %Y, %I:%M %p")
+    subject = f"🚨 SOS ALERT: {user.name} needs immediate help — Umang AI"
+    text_body = (
+        f"URGENT SOS ALERT from Umang AI\n\n"
+        f"{user.name} has manually triggered an emergency SOS at {now_str}.\n\n"
+        f"Message: \"{request.message}\"\n\n"
+        f"Please contact them IMMEDIATELY.\n\n"
         f"— Umang AI Safety System"
     )
+    html_body = f"""
+    <div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden;border:1px solid #fca5a5;">
+      <div style="background:linear-gradient(135deg,#ef4444,#dc2626);padding:28px 32px;">
+        <h1 style="color:#fff;margin:0;font-size:22px;">🚨 Emergency SOS Alert</h1>
+        <p style="color:#fecaca;margin:8px 0 0;font-size:14px;">from Umang AI Safety System</p>
+      </div>
+      <div style="padding:28px 32px;">
+        <p style="color:#dc2626;font-size:18px;font-weight:bold;margin-top:0;">Immediate Attention Required</p>
+        <p style="color:#374151;font-size:15px;line-height:1.7;">
+          <strong>{user.name}</strong> has manually triggered an <strong>emergency SOS alert</strong> 
+          at <strong>{now_str}</strong>.
+        </p>
+        <div style="background:#fef2f2;border-left:4px solid #ef4444;padding:14px 18px;border-radius:8px;margin:20px 0;">
+          <p style="margin:0;color:#374151;font-size:15px;font-style:italic;">"{request.message}"</p>
+        </div>
+        <p style="color:#374151;font-size:15px;line-height:1.7;">
+          Please contact <strong>{user.name}</strong> immediately by phone or in person.
+        </p>
+        <p style="color:#6b7280;font-size:13px;margin-top:28px;">— Umang AI Safety System</p>
+      </div>
+    </div>
+    """
 
     try:
-        msg = MIMEText(body)
-        msg["Subject"] = subject
-        msg["From"] = EMAIL_ADDRESS
-        msg["To"] = user.family_email
-
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
-            smtp.login(EMAIL_ADDRESS, EMAIL_APP_PASSWORD)
-            smtp.sendmail(EMAIL_ADDRESS, user.family_email, msg.as_string())
-
+        send_email(user.family_email, subject, text_body, html_body)
         logger.info(f"[SOS] Alert sent to {user.family_email} for user {user.name}")
         return {"status": "sent", "to": user.family_email}
     except Exception as e:
